@@ -174,6 +174,8 @@ export default function App() {
   const [results, setResults] = useState<QuizResult[]>([]);
   const [quizConfig, setQuizConfig] = useState<{ count: number, topic?: string } | null>(null);
 
+  const [isFinishing, setIsFinishing] = useState(false);
+
   // 1. Sync Profile in real-time
   useEffect(() => {
     if (!sessionEmail) {
@@ -416,8 +418,10 @@ export default function App() {
                 config={quizConfig} 
                 allQuestions={questions} 
                 profile={profile}
+                isSyncing={isFinishing}
                 onFinish={async (res: QuizResult | null) => { 
                   if (res) {
+                    setIsFinishing(true);
                     try {
                       // Save result to Firestore
                       const resId = Math.random().toString(36).substring(2, 11);
@@ -450,9 +454,12 @@ export default function App() {
                     } catch (e) {
                       console.error(e);
                       toast.error('Erro ao salvar resultado no banco.');
+                    } finally {
+                      setIsFinishing(false);
                     }
                   }
                   setCurrentView('dashboard');
+                  window.scrollTo(0, 0);
                 }} 
               />
             )}
@@ -477,18 +484,28 @@ export default function App() {
 function Dashboard({ results, onStart, questions, profile }: any) {
   const [selectedCount, setSelectedCount] = useState(10);
   const [selectedTopic, setSelectedTopic] = useState<string | undefined>(undefined);
+  
+  if (!profile) return null;
+
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  const latestResult = profile?.latestResult || (results.length > 0 ? {
+  const latestResult = profile.latestResult || (results && results.length > 0 ? {
     score: results[0].score,
     total: results[0].total,
     date: results[0].date,
-    topicsCount: Object.keys(results[0].topicStats).length
+    topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
   } : null);
-  const totalQuizzes = profile?.totalSimulated || results.length;
-  const acc = profile?.totalQuestions && profile.totalQuestions > 0 
-    ? ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0)
-    : (results.length > 0 ? (results.reduce((a: any, b: any) => a + b.score, 0) / results.reduce((a: any, b: any) => a + b.total, 0) * 100).toFixed(0) : 0);
+
+  const totalQuizzes = profile.totalSimulated || (results ? results.length : 0);
+  
+  let acc = "0";
+  if (profile.totalQuestions && profile.totalQuestions > 0) {
+    acc = ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0);
+  } else if (results && results.length > 0) {
+    const totalScore = results.reduce((a: any, b: any) => a + (b.score || 0), 0);
+    const totalPossible = results.reduce((a: any, b: any) => a + (b.total || 0), 0);
+    if (totalPossible > 0) acc = ((totalScore / totalPossible) * 100).toFixed(0);
+  }
 
   return (
     <div className="space-y-8">
@@ -600,7 +617,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   );
 }
 
-function QuizView({ config, allQuestions, onFinish, profile }: any) {
+function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
   const [ans, setAns] = useState<(number | null)[]>([]);
@@ -608,6 +625,9 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Scroll to top on mount
+    window.scrollTo(0, 0);
+    
     setTimeout(() => {
       const filtered = config.topic ? allQuestions.filter((q: any) => q.topic === config.topic) : allQuestions;
       const final = [...filtered].sort(() => Math.random() - 0.5).slice(0, config.count);
@@ -620,9 +640,13 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
   if (loading) return <div className="flex flex-col items-center justify-center py-40"><Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" /><p className="font-bold text-slate-400">Embaralhando questões...</p></div>;
 
   if (finished) {
-    const score = ans.reduce((acc, v, i) => v === questions[i].correctIndex ? acc + 1 : acc, 0);
+    const score = ans.reduce((acc: number, v, i) => {
+      if (questions[i] && v === questions[i].correctIndex) return acc + 1;
+      return acc;
+    }, 0);
+
     const result: QuizResult = {
-      id: Math.random().toString(36),
+      id: Math.random().toString(36).substring(2, 11),
       date: new Date().toISOString(),
       total: questions.length,
       score,
@@ -648,7 +672,7 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
               <div className="lg:col-span-1 border-r border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pontuação</p>
                 <div className="text-6xl font-black text-indigo-600">{score}/{questions.length}</div>
-                <Badge color="indigo">{((score / questions.length) * 100).toFixed(0)}% Acertos</Badge>
+                <Badge color="indigo">{questions.length > 0 ? ((score / questions.length) * 100).toFixed(0) : 0}% Acertos</Badge>
               </div>
               <div className="text-left md:col-span-1 lg:col-span-2 space-y-4">
                  <h4 className="font-bold text-slate-500 uppercase text-xs tracking-widest flex items-center gap-2"><Target className="w-4 h-4" /> Desempenho</h4>
@@ -660,7 +684,7 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
                           <span className="text-slate-400">{(s.total - s.errors)}/{s.total}</span>
                         </div>
                         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-600" style={{ width: `${((s.total - s.errors) / s.total) * 100}%` }}></div>
+                          <div className="h-full bg-indigo-600" style={{ width: `${s.total > 0 ? ((s.total - s.errors) / s.total) * 100 : 0}%` }}></div>
                         </div>
                       </div>
                    ))}
@@ -668,8 +692,12 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
               </div>
            </div>
            <div className="p-10">
-             <button onClick={() => onFinish(result)} className="h-16 w-full lg:w-fit lg:px-20 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all">
-               Voltar para o Início
+             <button 
+               disabled={isSyncing}
+               onClick={(e) => { e.preventDefault(); onFinish(result); }} 
+               className="h-16 w-full lg:w-fit lg:px-20 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
+             >
+               {isSyncing ? <><Loader2 className="w-5 h-5 animate-spin" /> Salvando...</> : 'Voltar para o Início'}
              </button>
            </div>
         </div>
@@ -769,7 +797,7 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
            
            {idx === questions.length - 1 ? (
              <button 
-               onClick={() => { if(ans[idx] !== null) setFinished(true); }}
+               onClick={(e) => { e.preventDefault(); if(ans[idx] !== null) { setFinished(true); window.scrollTo(0,0); } }}
                disabled={ans[idx] === null}
                className="h-14 px-12 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 disabled:opacity-50 transition-all"
              >
