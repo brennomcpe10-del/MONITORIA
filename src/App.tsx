@@ -182,8 +182,7 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'questions'), (snap) => {
       const qData = snap.docs.map(d => ({ ...d.data(), id: d.id } as Question));
-      // Sort or keep original if there was an order, here we just take them
-      setQuestions(qData.length > 0 ? qData : INITIAL_QUESTIONS);
+      setQuestions(qData);
     });
     return () => unsub();
   }, []);
@@ -760,6 +759,18 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     }
   };
 
+  const handleSeedQuestions = async () => {
+    if (confirm('Deseja popular o banco de dados com as 8 questões iniciais padrão?')) {
+      try {
+        const promises = INITIAL_QUESTIONS.map(q => setDoc(doc(db, 'questions', q.id), q));
+        await Promise.all(promises);
+        toast.success('Banco de dados populado!');
+      } catch (e) {
+        toast.error('Erro ao popular banco.');
+      }
+    }
+  };
+
   const handleDecline = async (email: string) => {
     try {
       await deleteDoc(doc(db, 'users', email));
@@ -1072,31 +1083,49 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       {activeTab === 'list' && (
         <Card className="border-none shadow-2xl p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                  <th className="px-8 py-6">Assunto</th>
-                  <th className="px-8 py-6">Enunciado / Pergunta</th>
-                  <th className="px-8 py-6 text-right">Ação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {questions.map((q: any) => (
-                  <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors">
-                    <td className="px-8 py-6"><Badge color="indigo">{q.topic}</Badge></td>
-                    <td className="px-8 py-6 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
-                    <td className="px-8 py-6 text-right">
-                      <button 
-                        onClick={() => handleDeleteQuestion(q.id)}
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
+            {questions.length > 0 ? (
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                    <th className="px-8 py-6">Assunto</th>
+                    <th className="px-8 py-6">Enunciado / Pergunta</th>
+                    <th className="px-8 py-6 text-right">Ação</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {questions.map((q: any) => (
+                    <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors">
+                      <td className="px-8 py-6"><Badge color="indigo">{q.topic}</Badge></td>
+                      <td className="px-8 py-6 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
+                      <td className="px-8 py-6 text-right">
+                        <button 
+                          onClick={() => handleDeleteQuestion(q.id)}
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="p-20 text-center space-y-6">
+                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-300">
+                  <ClipboardList className="w-10 h-10" />
+                </div>
+                <div className="max-w-xs mx-auto">
+                  <h4 className="text-xl font-black text-slate-800 mb-2">Banco Vazio</h4>
+                  <p className="text-slate-400 font-medium text-sm mb-6">Nenhuma questão encontrada no sistema. Adicione manualmente ou carregue os padrões.</p>
+                  <button 
+                    onClick={handleSeedQuestions}
+                    className="h-12 px-8 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-lg shadow-indigo-600/20 hover:scale-105 transition-all"
+                  >
+                    Popular Banco Padrão
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       )}
