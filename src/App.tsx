@@ -46,7 +46,8 @@ import {
   where, 
   getDocs, 
   getDoc,
-  orderBy
+  orderBy,
+  increment
 } from 'firebase/firestore';
 
 // --- Firebase Config ---
@@ -72,6 +73,9 @@ interface UserProfile {
   role: Role;
   approved: boolean;
   lastMissedQuestionIds: string[];
+  totalSimulated?: number;
+  totalCorrect?: number;
+  totalQuestions?: number;
 }
 
 interface UserSummary {
@@ -79,6 +83,9 @@ interface UserSummary {
   email: string;
   role: Role;
   approved: boolean;
+  totalSimulated?: number;
+  totalCorrect?: number;
+  totalQuestions?: number;
 }
 
 interface Question {
@@ -104,6 +111,8 @@ interface QuizResult {
     };
   };
   missedQuestionIds: string[];
+  userEmail?: string;
+  userName?: string;
 }
 
 // --- Initial Mock Data ---
@@ -173,6 +182,9 @@ export default function App() {
         setSessionEmail(null);
         localStorage.removeItem('mm_session_email');
       }
+    }, (error) => {
+      console.error('Error fetching profile:', error);
+      toast.error('Erro ao sincronizar perfil em tempo real.');
     });
 
     return () => unsub();
@@ -209,6 +221,12 @@ export default function App() {
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
         setResults(rData);
+      }, (error) => {
+        console.error('Error fetching results:', error);
+        // It might be a missing index error
+        if (error.message.includes('index')) {
+           toast.error('Erro de índice no Firebase. As estatísticas podem demorar a aparecer.');
+        }
       });
       return () => unsub();
     } else {
@@ -395,15 +413,19 @@ export default function App() {
                     try {
                       // Save result to Firestore
                       const resId = Math.random().toString(36).substring(2, 11);
-                      await setDoc(doc(db, 'results', resId), { 
+                      const resultData = { 
                         ...res, 
                         userEmail: profile.email,
                         userName: profile.name 
-                      });
+                      };
+                      await setDoc(doc(db, 'results', resId), resultData);
                       
-                      // Update user's specific progress
+                      // Update user's specific progress AND statistics in real-time
                       await setDoc(doc(db, 'users', profile.email), { 
-                        lastMissedQuestionIds: res.missedQuestionIds 
+                        lastMissedQuestionIds: res.missedQuestionIds,
+                        totalSimulated: increment(1),
+                        totalCorrect: increment(res.score),
+                        totalQuestions: increment(res.total)
                       }, { merge: true });
                     } catch (e) {
                       console.error(e);
@@ -438,9 +460,10 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
   const latestResult = results[0];
-  const acc = results.length > 0 
-    ? (results.reduce((a: any, b: any) => a + b.score, 0) / results.reduce((a: any, b: any) => a + b.total, 0) * 100).toFixed(0) 
-    : 0;
+  const totalQuizzes = profile?.totalSimulated || results.length;
+  const acc = profile?.totalQuestions && profile.totalQuestions > 0 
+    ? ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0)
+    : (results.length > 0 ? (results.reduce((a: any, b: any) => a + b.score, 0) / results.reduce((a: any, b: any) => a + b.total, 0) * 100).toFixed(0) : 0);
 
   return (
     <div className="space-y-8">
@@ -451,7 +474,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
             <h2 className="text-4xl font-black mb-2 leading-none tracking-tight">Opa, {profile.name}! 👋</h2>
             <p className="text-indigo-100 font-medium mb-10">Mantenha o foco. O aprendizado é degrau por degrau.</p>
             <div className="mt-auto grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Simulados</p><p className="text-3xl font-black">{results.length}</p></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Simulados</p><p className="text-3xl font-black">{totalQuizzes}</p></div>
               <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Precisão</p><p className="text-3xl font-black text-indigo-100">{acc}%</p></div>
             </div>
           </div>
@@ -813,21 +836,21 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     };
   });
 
-  // 2. Fetch selected student details from Firebase
+  // 2. Fetch selected student details from Firebase (Real-time)
   useEffect(() => {
     if (!selectedStudent) {
       setStudentDetailedProfile(null);
       return;
     }
 
-    const fetchStudentDetails = async () => {
-      const user = allUsers.find((u: any) => u.email === selectedStudent);
-      const q = query(
-        collection(db, 'results'), 
-        where('userEmail', '==', selectedStudent),
-        orderBy('date', 'desc')
-      );
-      const snap = await getDocs(q);
+    const user = allUsers.find((u: any) => u.email === selectedStudent);
+    const q = query(
+      collection(db, 'results'), 
+      where('userEmail', '==', selectedStudent),
+      orderBy('date', 'desc')
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
       const userResults = snap.docs.map(d => d.data() as QuizResult);
       
       const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
@@ -843,9 +866,11 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       });
 
       setStudentDetailedProfile({ user, results: userResults, missedWithAnswers });
-    };
+    }, (error) => {
+      console.error('Error syncing student details:', error);
+    });
 
-    fetchStudentDetails();
+    return () => unsub();
   }, [selectedStudent, allUsers, questions]);
 
   const handleAdd = async (e: FormEvent) => {
@@ -893,6 +918,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                     <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                       <th className="px-8 py-6">Nome</th>
                       <th className="px-8 py-6">E-mail</th>
+                      <th className="px-8 py-6">Simulados</th>
                       <th className="px-8 py-6">Status</th>
                       <th className="px-8 py-6 text-right">Ações</th>
                     </tr>
@@ -909,6 +935,18 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                           </div>
                         </td>
                         <td className="px-8 py-6 text-sm text-slate-400 font-medium">{u.email}</td>
+                        <td className="px-8 py-6">
+                           <div className="flex flex-col">
+                             <span className="text-sm font-black text-slate-700">{u.totalSimulated || 0}</span>
+                             {u.totalQuestions ? (
+                               <span className="text-[10px] font-bold text-indigo-500">
+                                 {((u.totalCorrect || 0) / u.totalQuestions * 100).toFixed(0)}% de acerto
+                               </span>
+                             ) : (
+                               <span className="text-[10px] font-bold text-slate-300 italic">Sem dados</span>
+                             )}
+                           </div>
+                        </td>
                         <td className="px-8 py-6">
                           {u.approved ? (
                             <Badge color={u.role === 'monitor' ? 'indigo' : 'emerald'}>{u.role}</Badge>
