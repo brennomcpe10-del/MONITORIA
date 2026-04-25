@@ -33,6 +33,36 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 
+// Firebase Imports
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  setDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  getDocs, 
+  getDoc,
+  orderBy
+} from 'firebase/firestore';
+
+// --- Firebase Config ---
+const firebaseConfig = {
+  apiKey: 'AIzaSyCpVxucRWHOev_glPdkGPlbReGlDMXWkeM',
+  authDomain: 'monitoria-241b7.firebaseapp.com',
+  projectId: 'monitoria-241b7',
+  storageBucket: 'monitoria-241b7.firebasestorage.app',
+  messagingSenderId: '103385176949',
+  appId: '1:103385176949:web:f217c4adc07d024e7d113c',
+  measurementId: 'G-J0R4QS27C4'
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 // --- Types & Interfaces ---
 type Role = 'student' | 'monitor';
 
@@ -114,76 +144,89 @@ const Badge = ({ children, color = "indigo" }: { children: React.ReactNode, colo
 
 export default function App() {
   // --- Auth State ---
-  const [profile, setProfile] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('mm_profile');
-    return saved ? JSON.parse(saved) : null;
+  const [sessionEmail, setSessionEmail] = useState<string | null>(() => {
+    return localStorage.getItem('mm_session_email');
   });
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loginData, setLoginData] = useState({ name: '', email: '' });
 
   // --- App State ---
-  const [allUsers, setAllUsers] = useState<UserSummary[]>(() => {
-    const saved = localStorage.getItem('mm_all_users');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
   const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor'>('dashboard');
-  const [questions, setQuestions] = useState<Question[]>(() => {
-    const saved = localStorage.getItem('mm_questions');
-    return saved ? JSON.parse(saved) : INITIAL_QUESTIONS;
-  });
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResult[]>([]);
+  const [quizConfig, setQuizConfig] = useState<{ count: number, topic?: string } | null>(null);
 
-  // Effect to load results based on logged in user
+  // 1. Sync Profile in real-time
+  useEffect(() => {
+    if (!sessionEmail) {
+      setProfile(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, 'users', sessionEmail), (docSnap) => {
+      if (docSnap.exists()) {
+        setProfile(docSnap.data() as UserProfile);
+      } else {
+        // Handle case where user might have been deleted
+        setProfile(null);
+        setSessionEmail(null);
+        localStorage.removeItem('mm_session_email');
+      }
+    });
+
+    return () => unsub();
+  }, [sessionEmail]);
+
+  // 2. Sync Questions in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'questions'), (snap) => {
+      const qData = snap.docs.map(d => ({ ...d.data(), id: d.id } as Question));
+      // Sort or keep original if there was an order, here we just take them
+      setQuestions(qData.length > 0 ? qData : INITIAL_QUESTIONS);
+    });
+    return () => unsub();
+  }, []);
+
+  // 3. Sync All Users (for Monitor View)
+  useEffect(() => {
+    if (profile?.role === 'monitor') {
+      const unsub = onSnapshot(collection(db, 'users'), (snap) => {
+        const uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
+        setAllUsers(uData);
+      });
+      return () => unsub();
+    }
+  }, [profile?.role]);
+
+  // 4. Sync Results for the current user
   useEffect(() => {
     if (profile) {
-      const key = `mm_results_${profile.email}`;
-      const saved = localStorage.getItem(key);
-      setResults(saved ? JSON.parse(saved) : []);
+      const q = query(
+        collection(db, 'results'), 
+        where('userEmail', '==', profile.email),
+        orderBy('date', 'desc')
+      );
+      const unsub = onSnapshot(q, (snap) => {
+        const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
+        setResults(rData);
+      });
+      return () => unsub();
     } else {
       setResults([]);
     }
   }, [profile?.email]);
 
-  const [quizConfig, setQuizConfig] = useState<{ count: number, topic?: string } | null>(null);
-
-  // Persistence
-  useEffect(() => {
-    localStorage.setItem('mm_profile', JSON.stringify(profile));
-    // Sync profile back to allUsers if it changed (e.g. approved)
-    if (profile) {
-      setAllUsers(prev => {
-        const index = prev.findIndex(u => u.email === profile.email);
-        if (index !== -1) {
-          const updated = [...prev];
-          updated[index] = { ...updated[index], approved: profile.approved, role: profile.role, name: profile.name };
-          return updated;
-        }
-        return prev;
-      });
-    }
-  }, [profile]);
-  
-  useEffect(() => {
-    localStorage.setItem('mm_all_users', JSON.stringify(allUsers));
-  }, [allUsers]);
-
-  useEffect(() => {
-    localStorage.setItem('mm_questions', JSON.stringify(questions));
-  }, [questions]);
-
-  useEffect(() => {
-    if (profile) {
-      localStorage.setItem(`mm_results_${profile.email}`, JSON.stringify(results));
-    }
-  }, [results, profile?.email]);
-
   // Logout
   const handleLogout = () => {
+    setSessionEmail(null);
     setProfile(null);
+    localStorage.removeItem('mm_session_email');
     setCurrentView('dashboard');
   };
 
-  // Login
-  const handleLogin = (e: FormEvent) => {
+  // Login Logic
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     if (!loginData.name || !loginData.email) return toast.error('Preencha os campos!');
     
@@ -191,32 +234,34 @@ export default function App() {
     const isAdmin = email === 'brennomcpe10@gmail.com';
     const name = isAdmin ? 'Halysson Brenno' : loginData.name;
     
-    // Check if user already exists in global registry
-    const existingUser = allUsers.find(u => u.email === email);
-    
-    const newProfile: UserProfile = {
-      name: existingUser ? existingUser.name : name,
-      email: email,
-      role: isAdmin ? 'monitor' : (existingUser ? existingUser.role : 'student'),
-      approved: isAdmin ? true : (existingUser ? existingUser.approved : false),
-      lastMissedQuestionIds: []
-    };
+    try {
+      const userRef = doc(db, 'users', email);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        const newProfile: UserProfile = {
+          name: name,
+          email: email,
+          role: isAdmin ? 'monitor' : 'student',
+          approved: isAdmin ? true : false,
+          lastMissedQuestionIds: []
+        };
+        await setDoc(userRef, newProfile);
+        toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
+      } else {
+        // If admin logs in, ensure they are always monitor/approved even if data was manually changed
+        if (isAdmin) {
+          await setDoc(userRef, { role: 'monitor', approved: true }, { merge: true });
+        }
+        toast.success('Bem-vindo de volta!');
+      }
 
-    if (!existingUser) {
-      setAllUsers(prev => [...prev, {
-        name: newProfile.name,
-        email: newProfile.email,
-        role: newProfile.role,
-        approved: newProfile.approved
-      }]);
-    } else {
-      // Update approved status from registry in case it changed
-      newProfile.approved = isAdmin ? true : existingUser.approved;
-      newProfile.role = isAdmin ? 'monitor' : existingUser.role;
+      setSessionEmail(email);
+      localStorage.setItem('mm_session_email', email);
+    } catch (error) {
+      console.error(error);
+      toast.error('Erro ao conectar ao Firebase.');
     }
-
-    setProfile(newProfile);
-    toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
   };
 
   if (!profile) {
@@ -346,9 +391,26 @@ export default function App() {
                 config={quizConfig} 
                 allQuestions={questions} 
                 profile={profile}
-                onFinish={(res) => { 
-                  setResults(prev => [res, ...prev]); 
-                  setProfile(prev => prev ? {...prev, lastMissedQuestionIds: res.missedQuestionIds} : null);
+                onFinish={async (res: QuizResult | null) => { 
+                  if (res) {
+                    try {
+                      // Save result to Firestore
+                      const resId = Math.random().toString(36).substring(2, 11);
+                      await setDoc(doc(db, 'results', resId), { 
+                        ...res, 
+                        userEmail: profile.email,
+                        userName: profile.name 
+                      });
+                      
+                      // Update user's specific progress
+                      await setDoc(doc(db, 'users', profile.email), { 
+                        lastMissedQuestionIds: res.missedQuestionIds 
+                      }, { merge: true });
+                    } catch (e) {
+                      console.error(e);
+                      toast.error('Erro ao salvar resultado no banco.');
+                    }
+                  }
                   setCurrentView('dashboard');
                 }} 
               />
@@ -357,9 +419,7 @@ export default function App() {
               <MonitorView 
                 results={results} 
                 questions={questions} 
-                setQuestions={setQuestions} 
                 allUsers={allUsers} 
-                setAllUsers={setAllUsers} 
                 isAdmin={profile.email === 'brennomcpe10@gmail.com'}
               />
             )}
@@ -685,36 +745,52 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
   );
 }
 
-function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, isAdmin }: any) {
+function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
   const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+  const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
 
-  const handleApprove = (email: string, role: Role) => {
-    setAllUsers((prev: UserSummary[]) => prev.map(u => u.email === email ? { ...u, approved: true, role } : u));
-    toast.success(`Usuário aprovado como ${role}!`);
+  const handleApprove = async (email: string, role: Role) => {
+    try {
+      await setDoc(doc(db, 'users', email), { approved: true, role }, { merge: true });
+      toast.success(`Usuário aprovado como ${role}!`);
+    } catch (e) {
+      toast.error('Erro na aprovação.');
+    }
   };
 
-  const handleDecline = (email: string) => {
-    setAllUsers((prev: UserSummary[]) => prev.filter(u => u.email !== email));
-    toast.info('Solicitação removida.');
+  const handleDecline = async (email: string) => {
+    try {
+      await deleteDoc(doc(db, 'users', email));
+      toast.info('Solicitação removida.');
+    } catch (e) {
+      toast.error('Erro ao remover.');
+    }
   };
 
-  const handleDeleteQuestion = (id: string) => {
+  const handleDeleteQuestion = async (id: string) => {
     if (confirm('Excluir esta questão permanentemente?')) {
-      setQuestions((prev: Question[]) => prev.filter(q => q.id !== id));
-      toast.success('Questão removida.');
+      try {
+        await deleteDoc(doc(db, 'questions', id));
+        toast.success('Questão removida.');
+      } catch (e) {
+        toast.error('Erro ao excluir questão.');
+      }
     }
   };
 
-  const allSystemResults: QuizResult[] = [];
-  allUsers.forEach((u: any) => {
-    const saved = localStorage.getItem(`mm_results_${u.email}`);
-    if (saved) {
-      const userRes = JSON.parse(saved);
-      allSystemResults.push(...userRes);
+  // 1. Calculate and fetch global heatmap (all results)
+  const [allSystemResults, setAllSystemResults] = useState<QuizResult[]>([]);
+  useEffect(() => {
+    if (isAdmin) {
+       const q = collection(db, 'results');
+       const unsub = onSnapshot(q, (snap) => {
+         setAllSystemResults(snap.docs.map(d => d.data() as QuizResult));
+       });
+       return () => unsub();
     }
-  });
+  }, [isAdmin]);
 
   const questionHeatmap = questions.map((q: any) => {
     const timesAnswered = allSystemResults.filter(r => r.answers?.some((a: any) => a.questionId === q.id)).length;
@@ -726,36 +802,54 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
     };
   });
 
-  const studentDetailedProfile = useMemo(() => {
-    if (!selectedStudent) return null;
-    const user = allUsers.find((u: any) => u.email === selectedStudent);
-    const userResults = JSON.parse(localStorage.getItem(`mm_results_${selectedStudent}`) || '[]');
-    
-    // Aggregate missed questions across all simulations
-    const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
-      return r.missedQuestionIds.map(mqId => {
-        const q = questions.find((q: any) => q.id === mqId);
-        const ansInfo = r.answers?.find(a => a.questionId === mqId);
-        return q ? { 
-          ...q, 
-          marked: q.options[ansInfo?.selectedIndex || 0],
-          date: r.date 
-        } : null;
-      }).filter(Boolean);
-    });
+  // 2. Fetch selected student details from Firebase
+  useEffect(() => {
+    if (!selectedStudent) {
+      setStudentDetailedProfile(null);
+      return;
+    }
 
-    return { user, results: userResults, missedWithAnswers };
+    const fetchStudentDetails = async () => {
+      const user = allUsers.find((u: any) => u.email === selectedStudent);
+      const q = query(
+        collection(db, 'results'), 
+        where('userEmail', '==', selectedStudent),
+        orderBy('date', 'desc')
+      );
+      const snap = await getDocs(q);
+      const userResults = snap.docs.map(d => d.data() as QuizResult);
+      
+      const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
+        return r.missedQuestionIds.map(mqId => {
+          const q = questions.find((q: any) => q.id === mqId);
+          const ansInfo = r.answers?.find(a => a.questionId === mqId);
+          return q ? { 
+            ...q, 
+            marked: q.options[ansInfo?.selectedIndex || 0],
+            date: r.date 
+          } : null;
+        }).filter(Boolean);
+      });
+
+      setStudentDetailedProfile({ user, results: userResults, missedWithAnswers });
+    };
+
+    fetchStudentDetails();
   }, [selectedStudent, allUsers, questions]);
 
-  const handleAdd = (e: FormEvent) => {
+  const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
     if (!newQ.text || !newQ.topic || newQ.options.some(o => !o) || !newQ.explanation) return toast.error('Complete todos os campos!');
     
-    const created = { ...newQ, id: Math.random().toString(36) };
-    setQuestions((p:any) => [...p, created]);
-    toast.success('Questão cadastrada no banco!');
-    setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
-    setActiveTab('list');
+    try {
+      const id = Math.random().toString(36).substring(2, 11);
+      await setDoc(doc(db, 'questions', id), { ...newQ, id });
+      toast.success('Questão cadastrada no banco!');
+      setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+      setActiveTab('list');
+    } catch (e) {
+      toast.error('Erro ao cadastrar questão.');
+    }
   };
 
   return (
