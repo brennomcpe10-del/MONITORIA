@@ -77,6 +77,12 @@ interface UserProfile {
   totalSimulated?: number;
   totalCorrect?: number;
   totalQuestions?: number;
+  latestResult?: {
+    score: number;
+    total: number;
+    date: string;
+    topicsCount: number;
+  };
 }
 
 interface UserSummary {
@@ -340,7 +346,7 @@ export default function App() {
              <p className="text-slate-500 font-medium mb-8">Seu cadastro foi realizado, mas ainda não foi aprovado pelo monitor responsável. Volte mais tarde!</p>
              <button onClick={handleLogout} className="w-full h-14 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all">Sair do Sistema</button>
              <div className="mt-8 pt-8 border-t border-slate-100">
-               <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Contato: brennomcpe10@gmail.com</p>
+               <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Contato: Halysson Brenno - WhatsApp: (77) 99117-7472</p>
              </div>
           </Card>
         </motion.div>
@@ -433,7 +439,13 @@ export default function App() {
                         missedTopics: [...(profile.missedTopics || []), ...missedTopicsFromThisQuiz],
                         totalSimulated: increment(1),
                         totalCorrect: increment(res.score),
-                        totalQuestions: increment(res.total)
+                        totalQuestions: increment(res.total),
+                        latestResult: {
+                          score: res.score,
+                          total: res.total,
+                          date: res.date,
+                          topicsCount: Object.keys(res.topicStats).length
+                        }
                       }, { merge: true });
                     } catch (e) {
                       console.error(e);
@@ -467,7 +479,12 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   const [selectedTopic, setSelectedTopic] = useState<string | undefined>(undefined);
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  const latestResult = results[0];
+  const latestResult = profile?.latestResult || (results.length > 0 ? {
+    score: results[0].score,
+    total: results[0].total,
+    date: results[0].date,
+    topicsCount: Object.keys(results[0].topicStats).length
+  } : null);
   const totalQuizzes = profile?.totalSimulated || results.length;
   const acc = profile?.totalQuestions && profile.totalQuestions > 0 
     ? ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0)
@@ -502,7 +519,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                 </div>
               </div>
               <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                <Target className="w-3.5 h-3.5" /> Focado em {Object.keys(latestResult.topicStats).length} assunto(s)
+                <Target className="w-3.5 h-3.5" /> Focado em {latestResult.topicsCount} assunto(s)
               </div>
             </div>
           ) : (
@@ -776,10 +793,15 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
 function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
   const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
+  const [showMissedByStudents, setShowMissedByStudents] = useState<string | null>(null);
 
   const handleApprove = async (email: string, role: Role) => {
+    if (role === 'monitor' && !isAdmin) {
+      return toast.error('Apenas o administrador pode aprovar novos monitores.');
+    }
     try {
       await setDoc(doc(db, 'users', email), { approved: true, role }, { merge: true });
       toast.success(`Usuário aprovado como ${role}!`);
@@ -801,11 +823,13 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   };
 
   const handleDecline = async (email: string) => {
-    try {
-      await deleteDoc(doc(db, 'users', email));
-      toast.info('Solicitação removida.');
-    } catch (e) {
-      toast.error('Erro ao remover.');
+    if (confirm('Você tem certeza que deseja excluir esta conta?')) {
+      try {
+        await deleteDoc(doc(db, 'users', email));
+        toast.info('Solicitação removida.');
+      } catch (e) {
+        toast.error('Erro ao remover.');
+      }
     }
   };
 
@@ -884,14 +908,28 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     if (!newQ.text || !newQ.topic || newQ.options.some(o => !o) || !newQ.explanation) return toast.error('Complete todos os campos!');
     
     try {
-      const id = Math.random().toString(36).substring(2, 11);
+      const id = editingId || Math.random().toString(36).substring(2, 11);
       await setDoc(doc(db, 'questions', id), { ...newQ, id });
-      toast.success('Questão cadastrada no banco!');
+      toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
       setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+      setEditingId(null);
       setActiveTab('list');
     } catch (e) {
-      toast.error('Erro ao cadastrar questão.');
+      toast.error('Erro ao salvar questão.');
     }
+  };
+
+  const handleEditQuestion = (q: Question) => {
+    setNewQ({
+      text: q.text,
+      topic: q.topic,
+      options: [...q.options],
+      correctIndex: q.correctIndex,
+      explanation: q.explanation,
+      imageUrl: q.imageUrl || ''
+    });
+    setEditingId(q.id);
+    setActiveTab('add');
   };
 
   return (
@@ -990,12 +1028,14 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                                 >
                                   Aprovar Aluno
                                 </button>
-                                <button 
-                                  onClick={() => handleApprove(u.email, 'monitor')}
-                                  className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
-                                >
-                                  Aprovar Monitor
-                                </button>
+                                 {isAdmin && (
+                                  <button 
+                                    onClick={() => handleApprove(u.email, 'monitor')}
+                                    className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
+                                  >
+                                    Aprovar Monitor
+                                  </button>
+                                )}
                                 <button 
                                   onClick={() => handleDecline(u.email)}
                                   className="h-8 w-8 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-100"
@@ -1077,6 +1117,38 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
 
       {activeTab === 'stats' && (
         <div className="space-y-8 animate-in fade-in duration-300">
+           {showMissedByStudents && (
+             <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm">
+                <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl space-y-6">
+                   <div className="flex items-center justify-between">
+                      <h4 className="text-xl font-black text-slate-800">Quem errou esta questão?</h4>
+                      <button onClick={(e) => { e.stopPropagation(); setShowMissedByStudents(null); }} className="text-slate-400 hover:text-slate-600"><XCircle className="w-6 h-6" /></button>
+                   </div>
+                   <div className="space-y-3 max-h-60 overflow-y-auto">
+                      {(() => {
+                        const studentsWhoMissed = allSystemResults
+                          .filter(r => r.missedQuestionIds.includes(showMissedByStudents))
+                          .map(r => ({ name: r.userName || 'Anônimo', email: r.userEmail }));
+                        
+                        // Deduplicate by email
+                        const uniqueStudents = Array.from(new Map(studentsWhoMissed.map(item => [item.email, item])).values()) as { name: string, email: string }[];
+
+                        if (uniqueStudents.length === 0) return <p className="text-center py-4 text-slate-400 italic">Ninguém errou esta questão ainda.</p>;
+
+                        return uniqueStudents.map((s, i) => (
+                          <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3">
+                             <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center font-bold text-xs">{s.name ? s.name.charAt(0) : '?'}</div>
+                             <div>
+                               <p className="text-sm font-bold text-slate-700">{s.name}</p>
+                               <p className="text-[10px] text-slate-400 font-medium">{s.email}</p>
+                             </div>
+                          </div>
+                        ));
+                      })()}
+                   </div>
+                </motion.div>
+             </div>
+           )}
            <div className="grid gap-6 md:grid-cols-3">
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Totais</p>
@@ -1107,7 +1179,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                    </thead>
                    <tbody className="divide-y divide-slate-100">
                       {questionHeatmap.sort((a,b)=>b.errorRate - a.errorRate).map((q: any) => (
-                        <tr key={q.id}>
+                        <tr key={q.id} className="group hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setShowMissedByStudents(q.id)}>
                           <td className="py-4 text-sm font-medium text-slate-700 max-w-xs truncate pr-4">{q.text}</td>
                           <td className="py-4 text-sm font-black text-slate-400">{q.timesAnswered}</td>
                           <td className="py-4 text-right">
@@ -1142,12 +1214,20 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                       <td className="px-8 py-6"><Badge color="indigo">{q.topic}</Badge></td>
                       <td className="px-8 py-6 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
                       <td className="px-8 py-6 text-right">
-                        <button 
-                          onClick={() => handleDeleteQuestion(q.id)}
-                          className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => handleEditQuestion(q)}
+                            className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all opacity-0 group-hover:opacity-100"
+                          >
+                            <TrendingUp className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteQuestion(q.id)}
+                            className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1177,7 +1257,9 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       {activeTab === 'add' && (
         <div className="max-w-3xl mx-auto animate-in zoom-in-95 duration-200">
           <Card className="p-10 md:p-14">
-             <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2"><PlusSquare className="w-6 h-6 text-indigo-600" /> Cadastrar Questão</h3>
+             <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
+               <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
+             </h3>
              <form onSubmit={handleAdd} className="space-y-8">
                <div className="grid md:grid-cols-2 gap-6">
                  <div className="space-y-2">
@@ -1214,7 +1296,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                </div>
 
                <button type="submit" className="w-full h-16 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all mt-6">
-                 Salvar Questão no Banco
+                 {editingId ? 'Salvar Alterações' : 'Salvar Questão no Banco'}
                </button>
              </form>
           </Card>
