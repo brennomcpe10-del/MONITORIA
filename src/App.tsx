@@ -73,6 +73,7 @@ interface UserProfile {
   role: Role;
   approved: boolean;
   lastMissedQuestionIds: string[];
+  missedTopics?: string[];
   totalSimulated?: number;
   totalCorrect?: number;
   totalQuestions?: number;
@@ -83,6 +84,7 @@ interface UserSummary {
   email: string;
   role: Role;
   approved: boolean;
+  missedTopics?: string[];
   totalSimulated?: number;
   totalCorrect?: number;
   totalQuestions?: number;
@@ -421,8 +423,14 @@ export default function App() {
                       await setDoc(doc(db, 'results', resId), resultData);
                       
                       // Update user's specific progress AND statistics in real-time
+                      const missedTopicsFromThisQuiz = res.missedQuestionIds.map(id => {
+                        const q = questions.find(q => q.id === id);
+                        return q ? q.topic : null;
+                      }).filter(Boolean) as string[];
+
                       await setDoc(doc(db, 'users', profile.email), { 
                         lastMissedQuestionIds: res.missedQuestionIds,
+                        missedTopics: [...(profile.missedTopics || []), ...missedTopicsFromThisQuiz],
                         totalSimulated: increment(1),
                         totalCorrect: increment(res.score),
                         totalQuestions: increment(res.total)
@@ -548,20 +556,18 @@ function Dashboard({ results, onStart, questions, profile }: any) {
            <h3 className="text-xl font-bold flex items-center gap-2">Pontos Fracos</h3>
            <Card className="p-8 flex flex-col h-full bg-slate-900 text-white border-none shadow-indigo-600/10">
               <p className="text-slate-400 text-sm mb-8">Assuntos que você precisa reforçar de acordo com seus erros.</p>
-              {results.length > 0 ? (
+              {profile.missedTopics && profile.missedTopics.length > 0 ? (
                 <div className="space-y-6 flex-1">
-                   {Object.entries(results.reduce((acc, curr) => {
-                      Object.entries(curr.topicStats).forEach(([topic, stats]: any) => {
-                        if (!acc[topic]) acc[topic] = { total: 0, errors: 0 };
-                        acc[topic].total += stats.total; acc[topic].errors += stats.errors;
-                      }); return acc;
-                    }, {} as any)).sort((a:any, b:any) => (b[1].errors/b[1].total) - (a[1].errors/a[1].total)).slice(0, 4).map(([t, s]: any) => (
-                      <div key={t} className="flex items-center justify-between group">
+                   {Object.entries(profile.missedTopics.reduce((acc: any, topic: string) => {
+                      acc[topic] = (acc[topic] || 0) + 1;
+                      return acc;
+                    }, {})).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([topic, count]: any) => (
+                      <div key={topic} className="flex items-center justify-between group">
                         <div className="flex items-center gap-3">
                           <div className="w-2 h-2 rounded-full bg-rose-500 group-hover:scale-150 transition-all"></div>
-                          <span className="font-bold text-slate-200">{t}</span>
+                          <span className="font-bold text-slate-200">{topic}</span>
                         </div>
-                        <span className="text-xs font-black text-rose-500">{((s.errors/s.total)*100).toFixed(0)}% Erro</span>
+                        <span className="text-xs font-black text-rose-500">{count} {count === 1 ? 'erro' : 'erros'}</span>
                       </div>
                     ))}
                 </div>
