@@ -58,6 +58,7 @@ interface Question {
   options: string[];
   correctIndex: number;
   explanation: string;
+  imageUrl?: string;
 }
 
 interface QuizResult {
@@ -65,6 +66,7 @@ interface QuizResult {
   date: string;
   total: number;
   score: number;
+  answers: { questionId: string, selectedIndex: number }[];
   topicStats: {
     [topic: string]: {
       total: number;
@@ -519,6 +521,7 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
       date: new Date().toISOString(),
       total: questions.length,
       score,
+      answers: questions.map((q, i) => ({ questionId: q.id, selectedIndex: ans[i] as number })),
       topicStats: questions.reduce((acc, q, i) => {
         if (!acc[q.topic]) acc[q.topic] = { total: 0, errors: 0 };
         acc[q.topic].total += 1;
@@ -628,6 +631,11 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
              </span>
            )}
          </div>
+         {q.imageUrl && (
+           <div className="mb-8 rounded-3xl overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
+             <img src={q.imageUrl} alt="Contexto da questão" className="max-h-[300px] object-contain" />
+           </div>
+         )}
          <h2 className="text-2xl md:text-3xl font-bold text-slate-800 leading-tight mb-12">{q.text}</h2>
          
          <div className="grid gap-3">
@@ -678,8 +686,9 @@ function QuizView({ config, allQuestions, onFinish, profile }: any) {
 }
 
 function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, isAdmin }: any) {
-  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>(isAdmin ? 'stats' : 'stats');
-  const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '' });
+  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
+  const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
 
   const handleApprove = (email: string, role: Role) => {
     setAllUsers((prev: UserSummary[]) => prev.map(u => u.email === email ? { ...u, approved: true, role } : u));
@@ -691,20 +700,52 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
     toast.info('Solicitação removida.');
   };
 
-  const totalQuizzes = results.length;
-  const avgScore = totalQuizzes > 0 ? (results.reduce((a:any, b:any) => a + b.score, 0) / results.reduce((a:any, b:any) => a + b.total, 0) * 100).toFixed(1) : 0;
-  
-  const topicStats = results.reduce((acc: any, curr: any) => {
-    Object.entries(curr.topicStats).forEach(([topic, stats]: any) => {
-      if (!acc[topic]) acc[topic] = { total: 0, errors: 0 };
-      acc[topic].total += stats.total; acc[topic].errors += stats.errors;
-    }); return acc;
-  }, {} as any);
+  const handleDeleteQuestion = (id: string) => {
+    if (confirm('Excluir esta questão permanentemente?')) {
+      setQuestions((prev: Question[]) => prev.filter(q => q.id !== id));
+      toast.success('Questão removida.');
+    }
+  };
 
-  const mostMissed = questions.map((q: any) => ({ 
-    ...q, 
-    misses: results.reduce((acc: any, r: any) => acc + (r.missedQuestionIds.includes(q.id) ? 1 : 0), 0) 
-  })).sort((a: any, b: any) => b.misses - a.misses).slice(0, 8);
+  const allSystemResults: QuizResult[] = [];
+  allUsers.forEach((u: any) => {
+    const saved = localStorage.getItem(`mm_results_${u.email}`);
+    if (saved) {
+      const userRes = JSON.parse(saved);
+      allSystemResults.push(...userRes);
+    }
+  });
+
+  const questionHeatmap = questions.map((q: any) => {
+    const timesAnswered = allSystemResults.filter(r => r.answers?.some((a: any) => a.questionId === q.id)).length;
+    const errors = allSystemResults.filter(r => r.missedQuestionIds.includes(q.id)).length;
+    return {
+      ...q,
+      timesAnswered,
+      errorRate: timesAnswered > 0 ? (errors / timesAnswered) * 100 : 0
+    };
+  });
+
+  const studentDetailedProfile = useMemo(() => {
+    if (!selectedStudent) return null;
+    const user = allUsers.find((u: any) => u.email === selectedStudent);
+    const userResults = JSON.parse(localStorage.getItem(`mm_results_${selectedStudent}`) || '[]');
+    
+    // Aggregate missed questions across all simulations
+    const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
+      return r.missedQuestionIds.map(mqId => {
+        const q = questions.find((q: any) => q.id === mqId);
+        const ansInfo = r.answers?.find(a => a.questionId === mqId);
+        return q ? { 
+          ...q, 
+          marked: q.options[ansInfo?.selectedIndex || 0],
+          date: r.date 
+        } : null;
+      }).filter(Boolean);
+    });
+
+    return { user, results: userResults, missedWithAnswers };
+  }, [selectedStudent, allUsers, questions]);
 
   const handleAdd = (e: FormEvent) => {
     e.preventDefault();
@@ -713,7 +754,7 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
     const created = { ...newQ, id: Math.random().toString(36) };
     setQuestions((p:any) => [...p, created]);
     toast.success('Questão cadastrada no banco!');
-    setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '' });
+    setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
     setActiveTab('list');
   };
 
@@ -773,36 +814,48 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
                           )}
                         </td>
                         <td className="px-8 py-6 text-right">
-                          {!u.approved && (
-                            <div className="flex items-center justify-end gap-2">
-                              <button 
-                                onClick={() => handleApprove(u.email, 'student')}
-                                className="h-8 px-3 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-100"
-                              >
-                                Aprovar Aluno
-                              </button>
-                              <button 
-                                onClick={() => handleApprove(u.email, 'monitor')}
-                                className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
-                              >
-                                Aprovar Monitor
-                              </button>
-                              <button 
-                                onClick={() => handleDecline(u.email)}
-                                className="h-8 w-8 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-100"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-                          {u.approved && u.email !== 'brennomcpe10@gmail.com' && (
-                             <button 
-                               onClick={() => handleDecline(u.email)}
-                               className="h-8 w-8 bg-slate-50 text-slate-300 rounded-lg flex items-center justify-center hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
-                             >
-                               <Trash2 className="w-3.5 h-3.5" />
-                             </button>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            {u.approved && (
+                              <>
+                                <button 
+                                  onClick={() => setSelectedStudent(u.email)}
+                                  className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
+                                >
+                                  Ver Detalhes
+                                </button>
+                                {u.email !== 'brennomcpe10@gmail.com' && (
+                                  <button 
+                                    onClick={() => handleDecline(u.email)}
+                                    className="h-8 w-8 bg-slate-50 text-slate-300 rounded-lg flex items-center justify-center hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {!u.approved && (
+                              <>
+                                <button 
+                                  onClick={() => handleApprove(u.email, 'student')}
+                                  className="h-8 px-3 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-100"
+                                >
+                                  Aprovar Aluno
+                                </button>
+                                <button 
+                                  onClick={() => handleApprove(u.email, 'monitor')}
+                                  className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
+                                >
+                                  Aprovar Monitor
+                                </button>
+                                <button 
+                                  onClick={() => handleDecline(u.email)}
+                                  className="h-8 w-8 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center hover:bg-rose-100"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -813,53 +866,112 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
         </div>
       )}
 
+      {selectedStudent && studentDetailedProfile && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[2.5rem] w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
+               <div className="flex items-center gap-4">
+                 <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center font-black">{studentDetailedProfile.user.name.charAt(0)}</div>
+                 <div>
+                   <h3 className="text-xl font-black">{studentDetailedProfile.user.name}</h3>
+                   <p className="text-indigo-100 text-[10px] font-bold uppercase tracking-widest">{studentDetailedProfile.user.email}</p>
+                 </div>
+               </div>
+               <button onClick={() => setSelectedStudent(null)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all"><XCircle className="w-6 h-6" /></button>
+            </div>
+            <div className="p-8 overflow-y-auto flex-1 space-y-8">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Simulados</p>
+                  <p className="text-2xl font-black text-slate-800">{studentDetailedProfile.results.length}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Média</p>
+                  <p className="text-2xl font-black text-indigo-600">
+                    {studentDetailedProfile.results.length > 0 
+                      ? (studentDetailedProfile.results.reduce((a:any, b:any) => a + b.score, 0) / studentDetailedProfile.results.reduce((a:any, b:any) => a + b.total, 0) * 100).toFixed(0) 
+                      : 0}%
+                  </p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questões Erradas</p>
+                  <p className="text-2xl font-black text-rose-500">{studentDetailedProfile.missedWithAnswers.length}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-black text-slate-800 uppercase text-xs tracking-widest">Histórico de Erros Específicos</h4>
+                {studentDetailedProfile.missedWithAnswers.length > 0 ? (
+                  <div className="grid gap-4">
+                    {studentDetailedProfile.missedWithAnswers.map((m: any, i: number) => (
+                      <div key={i} className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <Badge>{m.topic}</Badge>
+                          <span className="text-[10px] font-bold text-slate-400">ERROU EM {new Date(m.date).toLocaleDateString('pt-BR')}</span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-700 leading-relaxed">{m.text}</p>
+                        <div className="flex gap-4">
+                          <div className="flex-1 p-2 rounded-xl bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-bold uppercase tracking-tight">MARCOU: {m.marked}</div>
+                          <div className="flex-1 p-2 rounded-xl bg-emerald-100 border border-emerald-200 text-emerald-700 text-[10px] font-bold uppercase tracking-tight">CORRETO: {m.options[m.correctIndex]}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center py-10 text-slate-300 font-bold italic">Nenhum erro registrado.</p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {activeTab === 'stats' && (
         <div className="space-y-8 animate-in fade-in duration-300">
            <div className="grid gap-6 md:grid-cols-3">
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
-               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Feitos</p>
-               <p className="text-4xl font-black text-indigo-600">{totalQuizzes}</p>
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Totais</p>
+               <p className="text-4xl font-black text-indigo-600">{allSystemResults.length}</p>
              </div>
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Banco Questões</p>
                <p className="text-4xl font-black text-emerald-500">{questions.length}</p>
              </div>
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
-               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Aproveitamento</p>
-               <p className="text-4xl font-black text-amber-500">{avgScore}%</p>
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Aproveitamento Global</p>
+               <p className="text-4xl font-black text-amber-500">
+                 {allSystemResults.length > 0 ? (allSystemResults.reduce((a,b)=>a+b.score,0)/allSystemResults.reduce((a,b)=>a+b.total,0)*100).toFixed(0):0}%
+               </p>
              </div>
            </div>
 
-           <div className="grid gap-8 lg:grid-cols-2">
-              <Card className="p-8">
-                 <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><ClipboardList className="w-5 h-5 text-indigo-600" /> Erros por Assunto</h3>
-                 <div className="space-y-4">
-                   {Object.entries(topicStats).sort((a:any, b:any) => (b[1].errors/b[1].total) - (a[1].errors/a[1].total)).map(([t, s]: any) => (
-                      <div key={t} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                        <span className="font-bold text-slate-700">{t}</span>
-                        <div className="flex items-center gap-4">
-                          <span className="text-[10px] font-black text-slate-400">Total: {s.total}</span>
-                          <span className={`px-3 py-1 rounded-full text-xs font-black ${s.errors / s.total > 0.4 ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
-                            {((s.errors / s.total) * 100).toFixed(0)}% Erro
-                          </span>
-                        </div>
-                      </div>
-                   ))}
-                 </div>
-              </Card>
-
-              <Card className="p-8">
-                 <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><AlertCircle className="w-5 h-5 text-rose-500" /> Questões Críticas</h3>
-                 <div className="space-y-4">
-                   {mostMissed.map((q: any) => (
-                      <div key={q.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                        <span className="truncate text-sm font-medium text-slate-600 pr-6">{q.text}</span>
-                        <span className="flex-shrink-0 font-black text-rose-600 text-sm">{q.misses} erros</span>
-                      </div>
-                   ))}
-                 </div>
-              </Card>
-           </div>
+           <Card className="p-8 overflow-hidden">
+              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-600" /> Mapa de Calor de Erros</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                   <thead>
+                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                        <th className="pb-4">Questão</th>
+                        <th className="pb-4">Respostas</th>
+                        <th className="pb-4 text-right">Taxa de Erro</th>
+                      </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100">
+                      {questionHeatmap.sort((a,b)=>b.errorRate - a.errorRate).map((q: any) => (
+                        <tr key={q.id}>
+                          <td className="py-4 text-sm font-medium text-slate-700 max-w-xs truncate pr-4">{q.text}</td>
+                          <td className="py-4 text-sm font-black text-slate-400">{q.timesAnswered}</td>
+                          <td className="py-4 text-right">
+                             <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${q.errorRate >= 50 ? 'bg-rose-500 text-white' : q.errorRate > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-400'}`}>
+                               {q.errorRate.toFixed(0)}%
+                             </div>
+                          </td>
+                        </tr>
+                      ))}
+                   </tbody>
+                </table>
+              </div>
+           </Card>
         </div>
       )}
 
@@ -880,7 +992,10 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
                     <td className="px-8 py-6"><Badge color="indigo">{q.topic}</Badge></td>
                     <td className="px-8 py-6 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
                     <td className="px-8 py-6 text-right">
-                      <button className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100">
+                      <button 
+                        onClick={() => handleDeleteQuestion(q.id)}
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </td>
@@ -897,9 +1012,15 @@ function MonitorView({ results, questions, setQuestions, allUsers, setAllUsers, 
           <Card className="p-10 md:p-14">
              <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2"><PlusSquare className="w-6 h-6 text-indigo-600" /> Cadastrar Questão</h3>
              <form onSubmit={handleAdd} className="space-y-8">
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
-                 <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
+               <div className="grid md:grid-cols-2 gap-6">
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
+                   <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL da Imagem (Opcional)</label>
+                   <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Link direto da imagem..." value={newQ.imageUrl} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
+                 </div>
                </div>
                <div className="space-y-2">
                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Enunciado Completo</label>
