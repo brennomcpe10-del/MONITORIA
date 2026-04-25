@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isMonitor() {
+      return isSignedIn() && getUserData().role == 'monitor';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isMonitor();
+      allow list: if isMonitor();
+      
+      // On creation, users can set their basic info but role must be 'student' by default 
+      // unless an admin/monitor logic is external. For this app, we'll allow setting it 
+      // but monitor role requires existing monitor approval or fixed list.
+      allow create: if isOwner(userId) 
+        && request.resource.data.role in ['student', 'monitor']
+        && request.resource.data.email == request.auth.token.email;
+      
+      allow update: if isOwner(userId) 
+        && request.resource.data.role == resource.data.role // Role is immutable
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.keys().hasAll(['name', 'email', 'role']);
+    }
+
+    match /questions/{questionId} {
+      allow read: if isSignedIn();
+      allow create: if isMonitor() && isValidQuestion(request.resource.data);
+      allow update: if isMonitor() && isValidQuestion(request.resource.data);
+      allow delete: if isMonitor();
+    }
+
+    function isValidQuestion(data) {
+      return data.text is string && data.text.size() <= 2000
+        && data.topic is string && data.topic.size() <= 100
+        && data.options is list && data.options.size() >= 2 && data.options.size() <= 6
+        && data.correctIndex is int && data.correctIndex >= 0 && data.correctIndex < data.options.size()
+        && data.explanation is string && data.explanation.size() <= 2000;
+    }
+
+    match /quiz_results/{resultId} {
+      allow get: if isSignedIn() && (isOwner(resource.data.userId) || isMonitor());
+      allow list: if isSignedIn() && (
+        (request.query.limit <= 50 && resource.data.userId == request.auth.uid) 
+        || isMonitor()
+      );
+      
+      allow create: if isSignedIn() 
+        && isOwner(request.resource.data.userId)
+        && isValidResult(request.resource.data);
+        
+      allow update, delete: if false; // Results are immutable
+    }
+
+    function isValidResult(data) {
+      return data.total is int && data.total > 0
+        && data.score is int && data.score >= 0 && data.score <= data.total
+        && data.date is timestamp
+        && data.topicStats is map;
+    }
+  }
+}

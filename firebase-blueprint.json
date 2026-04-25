@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "monitor"] },
+        "lastMissedQuestionIds": { "type": "array", "description": "IDs of questions missed in the most recent attempt" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Mathematics question",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "topic": { "type": "string" },
+        "options": { "type": "array" },
+        "correctIndex": { "type": "number" },
+        "explanation": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["text", "topic", "options", "correctIndex", "explanation"]
+    },
+    "QuizResult": {
+      "title": "QuizResult",
+      "description": "Record of a completed quiz attempt",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "total": { "type": "number" },
+        "score": { "type": "number" },
+        "topicStats": { 
+          "type": "object", 
+          "description": "Map of topic to { total, errors }"
+        },
+        "missedQuestionIds": { "type": "array" }
+      },
+      "required": ["userId", "date", "total", "score", "topicStats"]
+    },
+    "ClassStats": {
+      "title": "ClassStats",
+      "description": "Aggregated statistics for the monitor",
+      "type": "object",
+      "properties": {
+        "mostMissedQuestionIds": { "type": "object", "description": "QuestionId -> MissCount" },
+        "topicErrorRates": { "type": "object", "description": "Topic -> ErrorRate" }
+      }
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Individual user profiles"
+    },
+    "questions/{questionId}": {
+      "schema": "Question",
+      "description": "Question bank"
+    },
+    "quiz_results/{resultId}": {
+      "schema": "QuizResult",
+      "description": "Historical quiz attempts"
+    }
+  }
+}
