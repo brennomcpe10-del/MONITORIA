@@ -220,20 +220,23 @@ export default function App() {
     }
   }, [profile?.role]);
 
-  // 4. Sync Results for the current user
+  // 4. Sync Results
   useEffect(() => {
     if (profile) {
-      const q = query(
-        collection(db, 'results'), 
-        where('userEmail', '==', profile.email),
-        orderBy('date', 'desc')
-      );
+      // If monitor, fetch all results for global dashboard. If student, only their own.
+      const q = profile.role === 'monitor'
+        ? query(collection(db, 'results'), orderBy('date', 'desc'))
+        : query(
+            collection(db, 'results'), 
+            where('userEmail', '==', profile.email),
+            orderBy('date', 'desc')
+          );
+
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
         setResults(rData);
       }, (error) => {
         console.error('Error fetching results:', error);
-        // It might be a missing index error
         if (error.message.includes('index')) {
            toast.error('Erro de índice no Firebase. As estatísticas podem demorar a aparecer.');
         }
@@ -242,7 +245,7 @@ export default function App() {
     } else {
       setResults([]);
     }
-  }, [profile?.email]);
+  }, [profile?.email, profile?.role]);
 
   // Logout
   const handleLogout = () => {
@@ -487,19 +490,29 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   
   if (!profile) return null;
 
+  const isMonitor = profile.role === 'monitor';
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  const latestResult = profile.latestResult || (results && results.length > 0 ? {
-    score: results[0].score,
-    total: results[0].total,
-    date: results[0].date,
-    topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
-  } : null);
+  // For monitors, prioritize the global latest result from the results array.
+  // For students, prioritize their personal latestResult if it exists.
+  const latestResult = (isMonitor && results && results.length > 0) 
+    ? {
+        score: results[0].score,
+        total: results[0].total,
+        date: results[0].date,
+        topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
+      }
+    : (profile.latestResult || (results && results.length > 0 ? {
+        score: results[0].score,
+        total: results[0].total,
+        date: results[0].date,
+        topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
+      } : null));
 
-  const totalQuizzes = profile.totalSimulated || (results ? results.length : 0);
+  const totalQuizzes = isMonitor ? (results ? results.length : 0) : (profile.totalSimulated || (results ? results.length : 0));
   
   let acc = "0";
-  if (profile.totalQuestions && profile.totalQuestions > 0) {
+  if (!isMonitor && profile.totalQuestions && profile.totalQuestions > 0) {
     acc = ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0);
   } else if (results && results.length > 0) {
     const totalScore = results.reduce((a: any, b: any) => a + (b.score || 0), 0);
@@ -514,16 +527,18 @@ function Dashboard({ results, onStart, questions, profile }: any) {
           <div className="absolute right-0 top-0 w-80 h-80 bg-white/10 blur-[100px] rounded-full translate-x-1/3 -translate-y-1/3"></div>
           <div className="relative z-10 flex flex-col h-full">
             <h2 className="text-4xl font-black mb-2 leading-none tracking-tight">Opa, {profile.name}! 👋</h2>
-            <p className="text-indigo-100 font-medium mb-10">Mantenha o foco. O aprendizado é degrau por degrau.</p>
+            <p className="text-indigo-100 font-medium mb-10">
+              {isMonitor ? 'Você está vendo as estatísticas globais da turma.' : 'Mantenha o foco. O aprendizado é degrau por degrau.'}
+            </p>
             <div className="mt-auto grid grid-cols-2 md:grid-cols-4 gap-4">
               <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Simulados</p><p className="text-3xl font-black">{totalQuizzes}</p></div>
-              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Precisão</p><p className="text-3xl font-black text-indigo-100">{acc}%</p></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">{isMonitor ? 'Média Geral' : 'Precisão'}</p><p className="text-3xl font-black text-indigo-100">{acc}%</p></div>
             </div>
           </div>
         </div>
 
         <Card className="flex flex-col p-8">
-          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5 text-indigo-600" /> Último Desempenho</h3>
+          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5 text-indigo-600" /> {isMonitor ? 'Último Simulado da Turma' : 'Último Desempenho'}</h3>
           {latestResult ? (
             <div className="space-y-6">
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-3xl border border-slate-100">
@@ -897,21 +912,9 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     }
   };
 
-  // 1. Calculate and fetch global heatmap (all results)
-  const [allSystemResults, setAllSystemResults] = useState<QuizResult[]>([]);
-  useEffect(() => {
-    if (isAdmin) {
-       const q = collection(db, 'results');
-       const unsub = onSnapshot(q, (snap) => {
-         setAllSystemResults(snap.docs.map(d => d.data() as QuizResult));
-       });
-       return () => unsub();
-    }
-  }, [isAdmin]);
-
   const questionHeatmap = questions.map((q: any) => {
-    const timesAnswered = allSystemResults.filter(r => r.answers?.some((a: any) => a.questionId === q.id)).length;
-    const errors = allSystemResults.filter(r => r.missedQuestionIds.includes(q.id)).length;
+    const timesAnswered = results.filter((r: any) => r.answers?.some((a: any) => a.questionId === q.id)).length;
+    const errors = results.filter((r: any) => r.missedQuestionIds.includes(q.id)).length;
     return {
       ...q,
       timesAnswered,
@@ -1030,7 +1033,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • 3º Ano C</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex gap-1 w-fit">
-           {(isAdmin ? ['stats', 'list', 'add', 'users'] : ['stats', 'list', 'add'] as const).map(t => (
+           {(['stats', 'list', 'add', 'users'] as const).map(t => (
              <button key={t} onClick={() => setActiveTab(t as any)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${activeTab === t ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>
                {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : 'Usuários'}
              </button>
@@ -1038,7 +1041,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
         </div>
       </div>
 
-      {activeTab === 'users' && isAdmin && (
+      {activeTab === 'users' && (
         <div className="space-y-6">
            <div className="flex items-center justify-between">
              <h3 className="text-xl font-bold flex items-center gap-2">Gestão de Usuários</h3>
@@ -1216,9 +1219,9 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                    </div>
                    <div className="space-y-3 max-h-60 overflow-y-auto">
                       {(() => {
-                        const studentsWhoMissed = allSystemResults
-                          .filter(r => r.missedQuestionIds.includes(showMissedByStudents))
-                          .map(r => ({ name: r.userName || 'Anônimo', email: r.userEmail }));
+                        const studentsWhoMissed = results
+                          .filter((r: any) => r.missedQuestionIds.includes(showMissedByStudents))
+                          .map((r: any) => ({ name: r.userName || 'Anônimo', email: r.userEmail }));
                         
                         // Deduplicate by email
                         const uniqueStudents = Array.from(new Map(studentsWhoMissed.map(item => [item.email, item])).values()) as { name: string, email: string }[];
@@ -1242,7 +1245,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
            <div className="grid gap-6 md:grid-cols-3">
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Totais</p>
-               <p className="text-4xl font-black text-indigo-600">{allSystemResults.length}</p>
+               <p className="text-4xl font-black text-indigo-600">{results.length}</p>
              </div>
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Banco Questões</p>
@@ -1251,7 +1254,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Aproveitamento Global</p>
                <p className="text-4xl font-black text-amber-500">
-                 {allSystemResults.length > 0 ? (allSystemResults.reduce((a,b)=>a+b.score,0)/allSystemResults.reduce((a,b)=>a+b.total,0)*100).toFixed(0):0}%
+                 {results.length > 0 ? (results.reduce((a:any,b:any)=>a+b.score,0)/results.reduce((a:any,b:any)=>a+b.total,0)*100).toFixed(0):0}%
                </p>
              </div>
            </div>
