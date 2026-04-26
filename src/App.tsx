@@ -822,6 +822,8 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
   const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [bulkJson, setBulkJson] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
   const [showMissedByStudents, setShowMissedByStudents] = useState<string | null>(null);
@@ -958,6 +960,43 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     });
     setEditingId(q.id);
     setActiveTab('add');
+  };
+
+  const handleBulkImport = async () => {
+    if (!bulkJson.trim()) return toast.error('Cole o JSON das questões primeiro!');
+    
+    try {
+      const data = JSON.parse(bulkJson);
+      if (!Array.isArray(data)) throw new Error('O formato deve ser um array de questões.');
+      
+      setIsImporting(true);
+      let count = 0;
+      
+      for (const q of data) {
+        // Simple validation or defaults
+        const id = q.id || Math.random().toString(36).substring(2, 11);
+        const questionData = {
+          id,
+          text: q.text || '',
+          topic: q.topic || 'Sem Categoria',
+          options: q.options || ['', '', '', ''],
+          correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
+          explanation: q.explanation || '',
+          imageUrl: q.imageUrl || ''
+        };
+        
+        await setDoc(doc(db, 'questions', id), questionData);
+        count++;
+      }
+      
+      toast.success(`Sucesso! ${count} questões foram importadas.`);
+      setBulkJson('');
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Erro no formato do JSON: ' + e.message);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   return (
@@ -1330,6 +1369,34 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           </Card>
         </div>
       )}
+
+      {/* Bulk Import Tool */}
+      <div className="mt-20 pt-10 border-t-2 border-slate-100 italic">
+        <Card className="p-10 bg-slate-50 border-dashed border-2 border-slate-200">
+          <div className="flex items-center gap-3 mb-6">
+            <ClipboardList className="w-6 h-6 text-indigo-600" />
+            <h3 className="text-xl font-black text-slate-800">Ferramenta de Importação em Massa</h3>
+          </div>
+          <p className="text-sm text-slate-500 mb-6 font-medium">
+            Cole abaixo uma lista de questões em formato JSON para cadastrá-las instantaneamente no banco de dados.
+          </p>
+          <textarea
+            rows={10}
+            className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-mono text-xs mb-6"
+            placeholder='[ { "text": "Pergunta?", "topic": "Assunto", "options": ["A", "B", "C", "D"], "correctIndex": 0, "explanation": "Explicação" }, ... ]'
+            value={bulkJson}
+            onChange={(e) => setBulkJson(e.target.value)}
+          />
+          <button
+            onClick={handleBulkImport}
+            disabled={isImporting}
+            className="h-16 px-10 bg-slate-800 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-slate-900 active:scale-95 transition-all flex items-center gap-3 disabled:opacity-50"
+          >
+            {isImporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlusCircle className="w-5 h-5" />}
+            Importar Lista de Questões
+          </button>
+        </Card>
+      </div>
     </div>
   );
 }
