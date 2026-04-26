@@ -973,15 +973,15 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       let count = 0;
       
       for (const q of data) {
-        // Simple validation or defaults
+        // Map user provided keys to internal question record fields
         const id = q.id || Math.random().toString(36).substring(2, 11);
         const questionData = {
           id,
-          text: q.text || '',
-          topic: q.topic || 'Sem Categoria',
-          options: q.options || ['', '', '', ''],
-          correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
-          explanation: q.explanation || '',
+          text: q.text || q.pergunta || q.enunciado || '',
+          topic: q.topic || q.assunto || 'Sem Categoria',
+          options: q.options || q.opcoes || q.alternativas || ['', '', '', ''],
+          correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : (typeof q.correta === 'number' ? q.correta : (typeof q.resposta === 'number' ? q.resposta : 0)),
+          explanation: q.explanation || q.explicacao || '',
           imageUrl: q.imageUrl || ''
         };
         
@@ -1383,7 +1383,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           <textarea
             rows={10}
             className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-mono text-xs mb-6"
-            placeholder='[ { "text": "Pergunta?", "topic": "Assunto", "options": ["A", "B", "C", "D"], "correctIndex": 0, "explanation": "Explicação" }, ... ]'
+            placeholder='[ { "pergunta": "Pergunta?", "assunto": "Assunto", "opcoes": ["A", "B", "C", "D"], "correta": 0, "explicacao": "Explicação" }, ... ]'
             value={bulkJson}
             onChange={(e) => setBulkJson(e.target.value)}
           />
