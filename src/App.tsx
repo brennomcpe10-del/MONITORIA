@@ -661,11 +661,39 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
     window.scrollTo(0, 0);
     
     setTimeout(() => {
-      const filtered = config.topic ? allQuestions.filter((q: any) => q.topic === config.topic) : allQuestions;
-      const final = [...filtered].sort(() => Math.random() - 0.5).slice(0, config.count);
-      setQuestions(final);
-      setAns(new Array(final.length).fill(null));
-      setLoading(false);
+      try {
+        // Validação de Dados: Garante que apenas questões completas sejam carregadas
+        const validated = allQuestions.filter((q: any) => {
+          const text = q.text || q.pergunta;
+          const options = q.options || q.opcoes;
+          const correct = q.correctIndex !== undefined ? q.correctIndex : q.correta;
+          return text && Array.isArray(options) && options.length === 4 && correct !== undefined;
+        });
+
+        // Filtro por assunto solicitado
+        const filtered = config.topic 
+          ? validated.filter((q: any) => q.topic === config.topic || q.assunto === config.topic) 
+          : validated;
+
+        // Verificação de Assunto: impede o início se não houver questões válidas
+        if (filtered.length === 0) {
+          toast.error(config.topic 
+            ? `Ops! Não encontramos questões válidas para o assunto "${config.topic}".` 
+            : 'Erro: O banco de questões parece estar vazio ou inválido.');
+          onFinish(null); // Retorna ao dashboard
+          return;
+        }
+
+        // Embaralhamento e preparação final
+        const final = [...filtered].sort(() => Math.random() - 0.5).slice(0, config.count);
+        setQuestions(final);
+        setAns(new Array(final.length).fill(null));
+        setLoading(false);
+      } catch (err) {
+        console.error("Erro crítico ao carregar simulado:", err);
+        toast.error('Erro ao carregar questões. Verifique o banco de dados.');
+        onFinish(null);
+      }
     }, 800);
   }, []);
 
