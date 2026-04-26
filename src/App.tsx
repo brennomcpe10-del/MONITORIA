@@ -174,7 +174,7 @@ export default function App() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
-  const [quizConfig, setQuizConfig] = useState<{ count: number, topic?: string } | null>(null);
+  const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[] } | null>(null);
 
   const [isFinishing, setIsFinishing] = useState(false);
 
@@ -429,7 +429,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
           >
             {currentView === 'dashboard' && (
-              <Dashboard results={userResults} onStart={(c, t) => { setQuizConfig({count:c, topic:t}); setCurrentView('quiz'); }} questions={questions} profile={profile} />
+              <Dashboard results={userResults} onStart={(c, t) => { setQuizConfig({count:c, topics:t}); setCurrentView('quiz'); }} questions={questions} profile={profile} />
             )}
             {currentView === 'quiz' && quizConfig && (
               <QuizView 
@@ -501,7 +501,7 @@ export default function App() {
 
 function Dashboard({ results, onStart, questions, profile }: any) {
   const [selectedCount, setSelectedCount] = useState(10);
-  const [selectedTopic, setSelectedTopic] = useState<string | undefined>(undefined);
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]); // Empty = Todos
   
   if (!profile) return null;
 
@@ -607,15 +607,35 @@ function Dashboard({ results, onStart, questions, profile }: any) {
               <div className="space-y-4">
                 <label className="text-sm font-black uppercase tracking-widest text-slate-400">Assunto</label>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setSelectedTopic(undefined)} className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopic === undefined ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}>Todos</button>
+                  <button 
+                    onClick={() => setSelectedTopics([])} 
+                    className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.length === 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                  >
+                    Todos
+                  </button>
                   {topics.map((t:any) => (
-                    <button key={t} onClick={() => setSelectedTopic(t)} className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopic === t ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}>{t}</button>
+                    <button 
+                      key={t} 
+                      onClick={() => {
+                        setSelectedTopics(prev => {
+                          if (prev.includes(t)) {
+                            const filtered = prev.filter(item => item !== t);
+                            return filtered;
+                          } else {
+                            return [...prev, t];
+                          }
+                        });
+                      }} 
+                      className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.includes(t) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                    >
+                      {t}
+                    </button>
                   ))}
                 </div>
               </div>
 
               <button 
-                onClick={() => onStart(selectedCount, selectedTopic)}
+                onClick={() => onStart(selectedCount, selectedTopics)}
                 className="w-full h-16 bg-emerald-500 text-white rounded-[1.5rem] font-black text-xl shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
               >
                 <Play className="w-6 h-6 fill-white" /> Iniciar Agora
@@ -676,14 +696,14 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
         });
 
         // Filtro por assunto solicitado
-        const filtered = config.topic 
-          ? validated.filter((q: any) => q.topic === config.topic || q.assunto === config.topic) 
+        const filtered = config.topics && config.topics.length > 0 
+          ? validated.filter((q: any) => config.topics.includes(q.topic) || config.topics.includes(q.assunto)) 
           : validated;
 
         // Verificação de Assunto: impede o início se não houver questões válidas
         if (filtered.length === 0) {
-          toast.error(config.topic 
-            ? `Ops! Não encontramos questões válidas para o assunto "${config.topic}".` 
+          toast.error(config.topics && config.topics.length > 0 
+            ? `Ops! Não encontramos questões válidas para os assuntos selecionados.` 
             : 'Erro: O banco de questões parece estar vazio ou inválido.');
           onFinish(null); // Retorna ao dashboard
           return;
@@ -1264,22 +1284,70 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
               </div>
 
               <div className="space-y-4">
-                <h4 className="font-black text-slate-800 uppercase text-xs tracking-widest">Histórico de Erros Específicos</h4>
+                <h4 className="font-black text-slate-800 uppercase text-xs tracking-widest flex items-center gap-2">
+                  <History className="w-4 h-4 text-rose-500" /> Histórico de Erros por Assunto
+                </h4>
                 {studentDetailedProfile.missedWithAnswers.length > 0 ? (
-                  <div className="grid gap-4">
-                    {studentDetailedProfile.missedWithAnswers.map((m: any, i: number) => (
-                      <div key={i} className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex flex-col gap-3">
-                        <div className="flex items-center justify-between">
-                          <Badge>{m.topic}</Badge>
-                          <span className="text-[10px] font-bold text-slate-400">ERROU EM {new Date(m.date).toLocaleDateString('pt-BR')}</span>
+                  <div className="space-y-3">
+                    {Object.entries(studentDetailedProfile.missedWithAnswers.reduce((acc: any, m: any) => {
+                      if (!acc[m.topic]) acc[m.topic] = [];
+                      acc[m.topic].push(m);
+                      return acc;
+                    }, {})).map(([topic, ms]: any) => {
+                      const topicKey = `student_err_${topic}`;
+                      const isExpanded = expandedTopics[topicKey];
+                      return (
+                        <div key={topic} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                          <button 
+                            onClick={() => toggleTopic(topicKey)}
+                            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-all text-left"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
+                                <AlertTriangle className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-black text-slate-800 tracking-tight">{topic}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ms.length} {ms.length === 1 ? 'erro registrado' : 'erros registrados'}</p>
+                              </div>
+                            </div>
+                            <div className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                              <ArrowRight className="w-4 h-4 text-slate-300 rotate-90" />
+                            </div>
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="border-t border-slate-50 overflow-hidden"
+                              >
+                                <div className="p-4 bg-slate-50/50 space-y-4">
+                                  {ms.map((m: any, i: number) => (
+                                    <div key={i} className="p-5 rounded-2xl border border-white bg-white shadow-sm flex flex-col gap-3">
+                                      <div className="flex items-center justify-between">
+                                        <Badge color="rose">Erro em {new Date(m.date).toLocaleDateString('pt-BR')}</Badge>
+                                      </div>
+                                      <p className="text-sm font-bold text-slate-700 leading-relaxed">{m.text}</p>
+                                      <div className="flex flex-col sm:flex-row gap-2">
+                                        <div className="flex-1 p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-tight flex items-center gap-2">
+                                          <XCircle className="w-3.5 h-3.5" /> Marcou: {m.marked}
+                                        </div>
+                                        <div className="flex-1 p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-tight flex items-center gap-2">
+                                          <CheckCircle2 className="w-3.5 h-3.5" /> Correto: {m.options[m.correctIndex]}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
-                        <p className="text-sm font-bold text-slate-700 leading-relaxed">{m.text}</p>
-                        <div className="flex gap-4">
-                          <div className="flex-1 p-2 rounded-xl bg-rose-100 border border-rose-200 text-rose-700 text-[10px] font-bold uppercase tracking-tight">MARCOU: {m.marked}</div>
-                          <div className="flex-1 p-2 rounded-xl bg-emerald-100 border border-emerald-200 text-emerald-700 text-[10px] font-bold uppercase tracking-tight">CORRETO: {m.options[m.correctIndex]}</div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-center py-10 text-slate-300 font-bold italic">Nenhum erro registrado.</p>
