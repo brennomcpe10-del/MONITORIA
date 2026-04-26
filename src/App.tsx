@@ -47,7 +47,8 @@ import {
   getDocs, 
   getDoc,
   orderBy,
-  increment
+  increment,
+  writeBatch
 } from 'firebase/firestore';
 
 // --- Firebase Config ---
@@ -891,6 +892,9 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
   const [showMissedByStudents, setShowMissedByStudents] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkDeleteCode, setBulkDeleteCode] = useState('');
 
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
 
@@ -941,6 +945,52 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       } catch (e) {
         toast.error('Erro ao excluir questão.');
       }
+    }
+  };
+
+  const handleToggleSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllTopic = (topic: string, qs: any[]) => {
+    const topicIds = qs.map(q => q.id);
+    const allSelected = topicIds.every(id => selectedIds.has(id));
+    
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        topicIds.forEach(id => next.delete(id));
+      } else {
+        topicIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDeleteData = async () => {
+    if (bulkDeleteCode !== '67') {
+      return toast.error('Código de confirmação incorreto!');
+    }
+    
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach(id => {
+        batch.delete(doc(db, 'questions', id));
+      });
+      await batch.commit();
+      
+      toast.success(`${selectedIds.size} questões excluídas com sucesso!`);
+      setSelectedIds(new Set());
+      setShowBulkDeleteModal(false);
+      setBulkDeleteCode('');
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao excluir questões em massa.');
     }
   };
 
@@ -1384,11 +1434,39 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       )}
 
       {activeTab === 'list' && (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
           <div className="flex items-center justify-between">
-             <h3 className="text-xl font-bold flex items-center gap-2 font-black italic tracking-tighter"><ClipboardList className="w-5 h-5 text-indigo-600" /> Banco de Questões</h3>
+             <div className="flex items-center gap-4">
+               <h3 className="text-xl font-bold flex items-center gap-2 font-black italic tracking-tighter"><ClipboardList className="w-5 h-5 text-indigo-600" /> Banco de Questões</h3>
+               {selectedIds.size > 0 && (
+                 <Badge color="indigo">{selectedIds.size} selecionadas</Badge>
+               )}
+             </div>
              <Badge color="indigo">Total: {questions.length}</Badge>
           </div>
+          
+          {selectedIds.size > 0 && (
+             <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-5 duration-300">
+               <div className="bg-slate-900 text-white px-8 py-4 rounded-3xl shadow-2xl flex items-center gap-6 border border-slate-800">
+                 <p className="text-sm font-black italic"><span className="text-indigo-400">{selectedIds.size}</span> questões selecionadas</p>
+                 <div className="w-px h-6 bg-slate-800"></div>
+                 <div className="flex items-center gap-3">
+                   <button 
+                    onClick={() => setShowBulkDeleteModal(true)}
+                    className="bg-rose-600 hover:bg-rose-700 text-white px-6 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2"
+                   >
+                     <Trash2 className="w-4 h-4" /> Excluir Selecionados
+                   </button>
+                   <button 
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-slate-400 hover:text-white text-xs font-bold transition-colors px-2"
+                   >
+                     Desmarcar
+                   </button>
+                 </div>
+               </div>
+             </div>
+           )}
           
           {questions.length > 0 ? (
             <div className="space-y-3">
@@ -1404,7 +1482,14 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                        onClick={() => toggleTopic(`list_${topic}`)}
                        className="w-full px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-all text-left"
                      >
-                       <div className="flex items-center gap-4">
+                       <div className="flex items-center gap-4 flex-1">
+                         <button 
+                           onClick={(e) => { e.stopPropagation(); handleSelectAllTopic(topic, qs); }}
+                           className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all border ${qs.every((q:any) => selectedIds.has(q.id)) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-300 hover:border-indigo-300'}`}
+                           title="Selecionar Tudo deste Assunto"
+                         >
+                           <Target className="w-4 h-4" />
+                         </button>
                          <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
                            <Target className="w-5 h-5" />
                          </div>
@@ -1431,7 +1516,15 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                                <tbody className="divide-y divide-slate-50">
                                  {qs.map((q: any) => (
                                    <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors border-b border-slate-50">
-                                     <td className="px-8 py-4">
+                                     <td className="pl-8 pr-2 py-4 w-10">
+                                       <button 
+                                         onClick={() => handleToggleSelection(q.id)}
+                                         className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedIds.has(q.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 hover:border-indigo-300'}`}
+                                       >
+                                         {selectedIds.has(q.id) && <CheckCircle2 className="w-4 h-4" />}
+                                       </button>
+                                     </td>
+                                     <td className="px-4 py-4">
                                        <p className="text-sm font-bold text-slate-700 mb-1">{q.text}</p>
                                        {q.explanation && (
                                          <p className="text-[10px] text-indigo-500 font-black uppercase tracking-widest flex items-center gap-1 italic">
@@ -1565,6 +1658,55 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           </button>
         </Card>
       </div>
+
+      <AnimatePresence>
+        {showBulkDeleteModal && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl space-y-8"
+            >
+              <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mx-auto mb-2">
+                <AlertTriangle className="w-10 h-10" />
+              </div>
+              
+              <div className="text-center space-y-2">
+                <h4 className="text-2xl font-black text-slate-800">Ação Irreversível</h4>
+                <p className="text-slate-500 font-medium text-sm">Você está prestes a excluir <span className="text-rose-600 font-black">{selectedIds.size}</span> questões selecionadas. Esta ação é irreversível.</p>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 text-center">Digite o código de segurança para confirmar</p>
+                <input 
+                  type="text" 
+                  className="w-full h-16 text-center text-4xl font-black tracking-[0.5em] rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-rose-600/10 transition-all text-slate-800"
+                  value={bulkDeleteCode}
+                  onChange={e => setBulkDeleteCode(e.target.value)}
+                  maxLength={2}
+                />
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => { setShowBulkDeleteModal(false); setBulkDeleteCode(''); }}
+                  className="flex-1 h-16 rounded-2xl font-black text-slate-400 hover:bg-slate-50 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  disabled={bulkDeleteCode !== '67'}
+                  onClick={handleBulkDeleteData}
+                  className="flex-1 h-16 bg-rose-600 text-white rounded-2xl font-black shadow-xl shadow-rose-600/20 hover:bg-rose-700 disabled:opacity-30 disabled:grayscale transition-all"
+                >
+                  Confirmar Exclusão
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
