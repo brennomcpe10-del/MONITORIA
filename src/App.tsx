@@ -237,7 +237,7 @@ export default function App() {
         setResults(rData);
       }, (error) => {
         console.error('Error fetching results:', error);
-        if (error.message.includes('index')) {
+        if (error.message?.includes('index')) {
            toast.error('Erro de índice no Firebase. As estatísticas podem demorar a aparecer.');
         }
       });
@@ -767,7 +767,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
   }
 
   const q = questions[idx];
-  const isPreviouslyMissed = profile.lastMissedQuestionIds.includes(q.id);
+  const isPreviouslyMissed = profile.lastMissedQuestionIds?.includes(q.id);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -914,7 +914,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
 
   const questionHeatmap = questions.map((q: any) => {
     const timesAnswered = results.filter((r: any) => r.answers?.some((a: any) => a.questionId === q.id)).length;
-    const errors = results.filter((r: any) => r.missedQuestionIds.includes(q.id)).length;
+    const errors = results.filter((r: any) => r.missedQuestionIds?.includes(q.id)).length;
     return {
       ...q,
       timesAnswered,
@@ -1220,7 +1220,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                    <div className="space-y-3 max-h-60 overflow-y-auto">
                       {(() => {
                         const studentsWhoMissed = results
-                          .filter((r: any) => r.missedQuestionIds.includes(showMissedByStudents))
+                          .filter((r: any) => r.missedQuestionIds?.includes(showMissedByStudents))
                           .map((r: any) => ({ name: r.userName || 'Anônimo', email: r.userEmail }));
                         
                         // Deduplicate by email
