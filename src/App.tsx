@@ -531,8 +531,25 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Acertos</p>
                   <p className="text-2xl font-black text-slate-800">{latestResult.score}/{latestResult.total}</p>
                 </div>
-                <div className="w-14 h-14 rounded-full border-4 border-indigo-100 border-t-indigo-600 flex items-center justify-center font-black text-xs text-indigo-600">
-                  {((latestResult.score / latestResult.total) * 100).toFixed(0)}%
+                <div className="relative w-16 h-16 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90">
+                    <circle 
+                      cx="32" cy="32" r="28" 
+                      className="stroke-slate-100 fill-none" 
+                      strokeWidth="6" 
+                    />
+                    <circle 
+                      cx="32" cy="32" r="28" 
+                      className="stroke-indigo-600 fill-none transition-all duration-1000" 
+                      strokeWidth="6" 
+                      strokeDasharray={175.9} 
+                      strokeDashoffset={175.9 - (175.9 * (latestResult.score / latestResult.total))}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute font-black text-[10px] text-indigo-600">
+                    {((latestResult.score / latestResult.total) * 100).toFixed(0)}%
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
@@ -828,6 +845,12 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
   const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
   const [showMissedByStudents, setShowMissedByStudents] = useState<string | null>(null);
 
+  const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
+
+  const toggleTopic = (topic: string) => {
+    setExpandedTopics(prev => ({ ...prev, [topic]: !prev[topic] }));
+  };
+
   const handleApprove = async (email: string, role: Role) => {
     if (role === 'monitor' && !isAdmin) {
       return toast.error('Apenas o administrador pode aprovar novos monitores.');
@@ -1080,7 +1103,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                                 {u.email !== 'brennomcpe10@gmail.com' && (
                                   <button 
                                     onClick={() => handleDecline(u.email)}
-                                    className="h-8 w-8 bg-slate-50 text-slate-300 rounded-lg flex items-center justify-center hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                                    className="h-8 w-8 bg-slate-50 text-slate-400 rounded-lg flex items-center justify-center hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-100"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1233,92 +1256,175 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
              </div>
            </div>
 
-           <Card className="p-8 overflow-hidden">
-              <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-600" /> Mapa de Calor de Erros</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                   <thead>
-                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                        <th className="pb-4">Questão</th>
-                        <th className="pb-4">Respostas</th>
-                        <th className="pb-4 text-right">Taxa de Erro</th>
-                      </tr>
-                   </thead>
-                   <tbody className="divide-y divide-slate-100">
-                      {questionHeatmap.sort((a,b)=>b.errorRate - a.errorRate).map((q: any) => (
-                        <tr key={q.id} className="group hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setShowMissedByStudents(q.id)}>
-                          <td className="py-4 text-sm font-medium text-slate-700 max-w-xs truncate pr-4">{q.text}</td>
-                          <td className="py-4 text-sm font-black text-slate-400">{q.timesAnswered}</td>
-                          <td className="py-4 text-right">
-                             <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${q.errorRate >= 50 ? 'bg-rose-500 text-white' : q.errorRate > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-400'}`}>
-                               {q.errorRate.toFixed(0)}%
-                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                   </tbody>
-                </table>
+           <Card className="p-8 overflow-hidden bg-white">
+              <h3 className="text-xl font-bold mb-8 flex items-center gap-2 font-black italic tracking-tight"><TrendingUp className="w-5 h-5 text-indigo-600" /> Mapa de Calor por Assunto</h3>
+              
+              <div className="space-y-4">
+                {Object.entries(questionHeatmap.reduce((acc: any, q: any) => {
+                  if (!acc[q.topic]) acc[q.topic] = [];
+                  acc[q.topic].push(q);
+                  return acc;
+                }, {})).map(([topic, qs]: any) => {
+                  const isExpanded = expandedTopics[topic];
+                  const topicErrors = qs.reduce((a:any, b:any) => a + (b.timesAnswered > 0 ? (b.errorRate/100 * b.timesAnswered) : 0), 0);
+                  const topicTotal = qs.reduce((a:any, b:any) => a + b.timesAnswered, 0);
+                  const topicRate = topicTotal > 0 ? (topicErrors / topicTotal * 100) : 0;
+
+                  return (
+                    <div key={topic} className="border border-slate-100 rounded-3xl overflow-hidden bg-slate-50/30">
+                      <button 
+                        onClick={() => toggleTopic(topic)}
+                        className="w-full px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-all"
+                      >
+                        <div className="flex items-center gap-4">
+                           <div className={`w-3 h-3 rounded-full ${topicRate >= 50 ? 'bg-rose-500' : topicRate > 20 ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>
+                           <h4 className="font-black text-slate-800 text-sm tracking-tight">{topic}</h4>
+                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qs.length} questões</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Taxa de Erro</p>
+                            <p className={`text-lg font-black leading-none ${topicRate >= 50 ? 'text-rose-600' : 'text-slate-700'}`}>{topicRate.toFixed(0)}%</p>
+                          </div>
+                          <div className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                             <ArrowRight className="w-4 h-4 text-indigo-400 rotate-90" />
+                          </div>
+                        </div>
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="bg-white border-t border-slate-100 overflow-hidden"
+                          >
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left">
+                                <tbody className="divide-y divide-slate-50">
+                                  {qs.sort((a:any, b:any) => b.errorRate - a.errorRate).map((q: any) => (
+                                    <tr key={q.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setShowMissedByStudents(q.id)}>
+                                      <td className="px-6 py-4 text-xs font-bold text-slate-600 max-w-xs md:max-w-md truncate">{q.text}</td>
+                                      <td className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-tighter">{q.timesAnswered} resp.</td>
+                                      <td className="px-6 py-4 text-right">
+                                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black ${q.errorRate >= 50 ? 'bg-rose-500 text-white' : q.errorRate > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-400'}`}>
+                                          {q.errorRate.toFixed(0)}%
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
               </div>
-           </Card>
+            </Card>
         </div>
       )}
 
       {activeTab === 'list' && (
-        <Card className="border-none shadow-2xl p-0">
-          <div className="overflow-x-auto">
-            {questions.length > 0 ? (
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                    <th className="px-8 py-6">Assunto</th>
-                    <th className="px-8 py-6">Enunciado / Pergunta</th>
-                    <th className="px-8 py-6 text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {questions.map((q: any) => (
-                    <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors">
-                      <td className="px-8 py-6"><Badge color="indigo">{q.topic}</Badge></td>
-                      <td className="px-8 py-6 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
-                      <td className="px-8 py-6 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button 
-                            onClick={() => handleEditQuestion(q)}
-                            className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <TrendingUp className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteQuestion(q.id)}
-                            className="w-10 h-10 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-20 text-center space-y-6">
-                <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-300">
-                  <ClipboardList className="w-10 h-10" />
-                </div>
-                <div className="max-w-xs mx-auto">
-                  <h4 className="text-xl font-black text-slate-800 mb-2">Banco Vazio</h4>
-                  <p className="text-slate-400 font-medium text-sm mb-6">Nenhuma questão encontrada no sistema. Adicione manualmente ou carregue os padrões.</p>
-                  <button 
-                    onClick={handleSeedQuestions}
-                    className="h-12 px-8 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-lg shadow-indigo-600/20 hover:scale-105 transition-all"
-                  >
-                    Popular Banco Padrão
-                  </button>
-                </div>
-              </div>
-            )}
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+             <h3 className="text-xl font-bold flex items-center gap-2 font-black italic tracking-tighter"><ClipboardList className="w-5 h-5 text-indigo-600" /> Banco de Questões</h3>
+             <Badge color="indigo">Total: {questions.length}</Badge>
           </div>
-        </Card>
+          
+          {questions.length > 0 ? (
+            <div className="space-y-3">
+               {Object.entries(questions.reduce((acc: any, q: any) => {
+                 if (!acc[q.topic]) acc[q.topic] = [];
+                 acc[q.topic].push(q);
+                 return acc;
+               }, {})).map(([topic, qs]: any) => {
+                 const isExpanded = expandedTopics[`list_${topic}`];
+                 return (
+                   <div key={topic} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                     <button 
+                       onClick={() => toggleTopic(`list_${topic}`)}
+                       className="w-full px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-all text-left"
+                     >
+                       <div className="flex items-center gap-4">
+                         <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
+                           <Target className="w-5 h-5" />
+                         </div>
+                         <div>
+                           <h4 className="font-black text-slate-800 tracking-tight">{topic}</h4>
+                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qs.length} questões cadastradas</p>
+                         </div>
+                       </div>
+                       <div className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                         <ArrowRight className="w-5 h-5 text-slate-300 rotate-90" />
+                       </div>
+                     </button>
+                     
+                     <AnimatePresence>
+                       {isExpanded && (
+                         <motion.div
+                           initial={{ height: 0, opacity: 0 }}
+                           animate={{ height: 'auto', opacity: 1 }}
+                           exit={{ height: 0, opacity: 0 }}
+                           className="border-t border-slate-50 overflow-hidden"
+                         >
+                           <div className="overflow-x-auto">
+                             <table className="w-full text-left">
+                               <tbody className="divide-y divide-slate-50">
+                                 {qs.map((q: any) => (
+                                   <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors">
+                                     <td className="px-8 py-4 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
+                                     <td className="px-8 py-4 text-right">
+                                       <div className="flex items-center justify-end gap-2">
+                                         <button 
+                                           onClick={() => handleEditQuestion(q)}
+                                           className="w-9 h-9 rounded-xl flex items-center justify-center text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all border border-indigo-100"
+                                           title="Editar"
+                                         >
+                                           <PlusSquare className="w-4 h-4" />
+                                         </button>
+                                         <button 
+                                           onClick={() => handleDeleteQuestion(q.id)}
+                                           className="w-9 h-9 rounded-xl flex items-center justify-center text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all border border-rose-100"
+                                           title="Excluir"
+                                         >
+                                           <Trash2 className="w-4 h-4" />
+                                         </button>
+                                       </div>
+                                     </td>
+                                   </tr>
+                                 ))}
+                               </tbody>
+                             </table>
+                           </div>
+                         </motion.div>
+                       )}
+                     </AnimatePresence>
+                   </div>
+                 );
+               })}
+            </div>
+          ) : (
+            <Card className="p-20 text-center space-y-6">
+              <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-300">
+                <ClipboardList className="w-10 h-10" />
+              </div>
+              <div className="max-w-xs mx-auto">
+                <h4 className="text-xl font-black text-slate-800 mb-2">Banco Vazio</h4>
+                <p className="text-slate-400 font-medium text-sm mb-6">Nenhuma questão encontrada no sistema. Adicione manualmente ou carregue os padrões.</p>
+                <button 
+                  onClick={handleSeedQuestions}
+                  className="h-12 px-8 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-lg shadow-indigo-600/20 hover:scale-105 transition-all"
+                >
+                  Popular Banco Padrão
+                </button>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
       {activeTab === 'add' && (
