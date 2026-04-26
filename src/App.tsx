@@ -171,7 +171,8 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
   const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor'>('dashboard');
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [results, setResults] = useState<QuizResult[]>([]);
+  const [userResults, setUserResults] = useState<QuizResult[]>([]);
+  const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
   const [quizConfig, setQuizConfig] = useState<{ count: number, topic?: string } | null>(null);
 
   const [isFinishing, setIsFinishing] = useState(false);
@@ -220,32 +221,45 @@ export default function App() {
     }
   }, [profile?.role]);
 
-  // 4. Sync Results
+  // 4. Sync Personal Results
   useEffect(() => {
     if (profile) {
-      // If monitor, fetch all results for global dashboard. If student, only their own.
-      const q = profile.role === 'monitor'
-        ? query(collection(db, 'results'), orderBy('date', 'desc'))
-        : query(
-            collection(db, 'results'), 
-            where('userEmail', '==', profile.email),
-            orderBy('date', 'desc')
-          );
+      const q = query(
+        collection(db, 'results'), 
+        where('userEmail', '==', profile.email),
+        orderBy('date', 'desc')
+      );
 
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
-        setResults(rData);
+        setUserResults(rData);
       }, (error) => {
-        console.error('Error fetching results:', error);
+        console.error('Error fetching personal results:', error);
         if (error.message?.includes('index')) {
-           toast.error('Erro de índice no Firebase. As estatísticas podem demorar a aparecer.');
+           toast.error('Erro de índice no Firebase. As estatísticas pessoais podem demorar a aparecer.');
         }
       });
       return () => unsub();
     } else {
-      setResults([]);
+      setUserResults([]);
     }
-  }, [profile?.email, profile?.role]);
+  }, [profile?.email]);
+
+  // 5. Sync All Results (System Dashboard for Monitors)
+  useEffect(() => {
+    if (profile?.role === 'monitor') {
+      const q = query(collection(db, 'results'), orderBy('date', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+        const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
+        setSystemResults(rData);
+      }, (error) => {
+        console.error('Error fetching system results:', error);
+      });
+      return () => unsub();
+    } else {
+      setSystemResults([]);
+    }
+  }, [profile?.role]);
 
   // Logout
   const handleLogout = () => {
@@ -414,7 +428,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
           >
             {currentView === 'dashboard' && (
-              <Dashboard results={results} onStart={(c, t) => { setQuizConfig({count:c, topic:t}); setCurrentView('quiz'); }} questions={questions} profile={profile} />
+              <Dashboard results={userResults} onStart={(c, t) => { setQuizConfig({count:c, topic:t}); setCurrentView('quiz'); }} questions={questions} profile={profile} />
             )}
             {currentView === 'quiz' && quizConfig && (
               <QuizView 
@@ -468,7 +482,7 @@ export default function App() {
             )}
             {currentView === 'monitor' && (
               <MonitorView 
-                results={results} 
+                results={systemResults} 
                 questions={questions} 
                 allUsers={allUsers} 
                 isAdmin={profile.email === 'brennomcpe10@gmail.com'}
@@ -493,26 +507,18 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   const isMonitor = profile.role === 'monitor';
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  // For monitors, prioritize the global latest result from the results array.
-  // For students, prioritize their personal latestResult if it exists.
-  const latestResult = (isMonitor && results && results.length > 0) 
-    ? {
-        score: results[0].score,
-        total: results[0].total,
-        date: results[0].date,
-        topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
-      }
-    : (profile.latestResult || (results && results.length > 0 ? {
-        score: results[0].score,
-        total: results[0].total,
-        date: results[0].date,
-        topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
-      } : null));
+  // Prioritize personal latestResult if it exists, else use the most recent from results array (which is already filtered by userEmail)
+  const latestResult = profile.latestResult || (results && results.length > 0 ? {
+    score: results[0].score,
+    total: results[0].total,
+    date: results[0].date,
+    topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
+  } : null);
 
-  const totalQuizzes = isMonitor ? (results ? results.length : 0) : (profile.totalSimulated || (results ? results.length : 0));
+  const totalQuizzes = profile.totalSimulated || (results ? results.length : 0);
   
   let acc = "0";
-  if (!isMonitor && profile.totalQuestions && profile.totalQuestions > 0) {
+  if (profile.totalQuestions && profile.totalQuestions > 0) {
     acc = ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0);
   } else if (results && results.length > 0) {
     const totalScore = results.reduce((a: any, b: any) => a + (b.score || 0), 0);
@@ -527,9 +533,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
           <div className="absolute right-0 top-0 w-80 h-80 bg-white/10 blur-[100px] rounded-full translate-x-1/3 -translate-y-1/3"></div>
           <div className="relative z-10 flex flex-col h-full">
             <h2 className="text-4xl font-black mb-2 leading-none tracking-tight">Opa, {profile.name}! 👋</h2>
-            <p className="text-indigo-100 font-medium mb-10">
-              {isMonitor ? 'Você está vendo as estatísticas globais da turma.' : 'Mantenha o foco. O aprendizado é degrau por degrau.'}
-            </p>
+            <p className="text-indigo-100 font-medium mb-10">Mantenha o foco. O aprendizado é degrau por degrau.</p>
             <div className="mt-auto grid grid-cols-2 md:grid-cols-4 gap-4">
               <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Simulados</p><p className="text-3xl font-black">{totalQuizzes}</p></div>
               <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">{isMonitor ? 'Média Geral' : 'Precisão'}</p><p className="text-3xl font-black text-indigo-100">{acc}%</p></div>
@@ -538,7 +542,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
         </div>
 
         <Card className="flex flex-col p-8">
-          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5 text-indigo-600" /> {isMonitor ? 'Último Simulado da Turma' : 'Último Desempenho'}</h3>
+          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5 text-indigo-600" /> Último Desempenho</h3>
           {latestResult ? (
             <div className="space-y-6">
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-3xl border border-slate-100">
@@ -1035,7 +1039,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           topic: q.topic || q.assunto || 'Sem Categoria',
           options: q.options || q.opcoes || q.alternativas || ['', '', '', ''],
           correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : (typeof q.correta === 'number' ? q.correta : (typeof q.resposta === 'number' ? q.resposta : 0)),
-          explanation: q.explanation || q.explicacao || '',
+          explanation: q.explanation || q.explicacao || q.correcao || '',
           imageUrl: q.imageUrl || ''
         };
         
@@ -1270,6 +1274,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                 </motion.div>
              </div>
            )}
+
            <div className="grid gap-6 md:grid-cols-3">
              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Totais</p>
@@ -1286,6 +1291,25 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                </p>
              </div>
            </div>
+
+           {results.length > 0 && (
+             <Card className="p-8 flex flex-col bg-indigo-50 border-indigo-100">
+               <h3 className="text-lg font-black text-indigo-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5" /> Último Simulado da Turma</h3>
+               <div className="flex items-center justify-between">
+                 <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black">{results[0].userName?.charAt(0) || '?'}</div>
+                   <div>
+                     <p className="text-sm font-black text-slate-800">{results[0].userName || 'Anônimo'}</p>
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Finalizou em {new Date(results[0].date).toLocaleString('pt-BR')}</p>
+                   </div>
+                 </div>
+                 <div className="text-right">
+                   <p className="text-2xl font-black text-indigo-600">{results[0].score}/{results[0].total}</p>
+                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{((results[0].score / results[0].total) * 100).toFixed(0)}% de acerto</p>
+                 </div>
+               </div>
+             </Card>
+           )}
 
            <Card className="p-8 overflow-hidden bg-white">
               <h3 className="text-xl font-bold mb-8 flex items-center gap-2 font-black italic tracking-tight"><TrendingUp className="w-5 h-5 text-indigo-600" /> Mapa de Calor por Assunto</h3>
@@ -1406,9 +1430,16 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                              <table className="w-full text-left">
                                <tbody className="divide-y divide-slate-50">
                                  {qs.map((q: any) => (
-                                   <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors">
-                                     <td className="px-8 py-4 text-sm font-bold text-slate-600 max-w-sm truncate">{q.text}</td>
-                                     <td className="px-8 py-4 text-right">
+                                   <tr key={q.id} className="group hover:bg-slate-50/50 transition-colors border-b border-slate-50">
+                                     <td className="px-8 py-4">
+                                       <p className="text-sm font-bold text-slate-700 mb-1">{q.text}</p>
+                                       {q.explanation && (
+                                         <p className="text-[10px] text-indigo-500 font-black uppercase tracking-widest flex items-center gap-1 italic">
+                                           <Lightbulb className="w-3 h-3" /> Dica: {q.explanation.substring(0, 80)}{q.explanation.length > 80 ? '...' : ''}
+                                         </p>
+                                       )}
+                                     </td>
+                                     <td className="px-8 py-4 text-right align-top">
                                        <div className="flex items-center justify-end gap-2">
                                          <button 
                                            onClick={() => handleEditQuestion(q)}
