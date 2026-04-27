@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useMemo, FormEvent } from 'react';
 import { 
   Calculator, 
+  BookOpen,
+  Microscope,
   LogOut, 
   LayoutDashboard, 
   Users, 
@@ -28,7 +30,10 @@ import {
   Trash2,
   Trophy,
   Target,
-  Timer
+  Timer,
+  Youtube,
+  ExternalLink,
+  Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -65,14 +70,74 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// --- Themes ---
+const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, title: string, classes: any }> = {
+  'Matemática': {
+    primary: 'indigo',
+    hex: '#4f46e5',
+    icon: Calculator,
+    title: 'Matemática Ninja',
+    classes: {
+      bg: 'bg-indigo-600',
+      text: 'text-indigo-600',
+      ring: 'focus:ring-indigo-600/10',
+      border: 'focus:border-indigo-600',
+      shadow: 'shadow-indigo-600/30',
+      hoverBg: 'hover:bg-indigo-50',
+      lightBg: 'bg-indigo-50',
+      darkHover: 'hover:bg-indigo-700',
+      accText: 'text-indigo-600/50',
+      decoration: 'decoration-indigo-600'
+    }
+  },
+  'Biologia': {
+    primary: 'emerald',
+    hex: '#22c55e',
+    icon: Microscope,
+    title: 'Biologia Celular',
+    classes: {
+      bg: 'bg-emerald-600',
+      text: 'text-emerald-600',
+      ring: 'focus:ring-emerald-600/10',
+      border: 'focus:border-emerald-600',
+      shadow: 'shadow-emerald-600/30',
+      hoverBg: 'hover:bg-emerald-50',
+      lightBg: 'bg-emerald-50',
+      darkHover: 'hover:bg-emerald-700',
+      accText: 'text-emerald-600/50',
+      decoration: 'decoration-emerald-600'
+    }
+  },
+  'Língua Portuguesa': {
+    primary: 'violet',
+    hex: '#8b5cf6',
+    icon: BookOpen,
+    title: 'Língua Portuguesa',
+    classes: {
+      bg: 'bg-violet-600',
+      text: 'text-violet-600',
+      ring: 'focus:ring-violet-600/10',
+      border: 'focus:border-violet-600',
+      shadow: 'shadow-violet-600/30',
+      hoverBg: 'hover:bg-violet-50',
+      lightBg: 'bg-violet-50',
+      darkHover: 'hover:bg-violet-700',
+      accText: 'text-violet-600/50',
+      decoration: 'decoration-violet-600'
+    }
+  }
+};
+
 // --- Types & Interfaces ---
 type Role = 'student' | 'monitor';
+type Course = 'Matemática' | 'Biologia' | 'Língua Portuguesa';
 
 interface UserProfile {
   name: string;
   email: string;
   role: Role;
   approved: boolean;
+  permissions?: Record<string, 'monitor' | 'estudante'>;
   lastMissedQuestionIds: string[];
   missedTopics?: string[];
   totalSimulated?: number;
@@ -91,6 +156,7 @@ interface UserSummary {
   email: string;
   role: Role;
   approved: boolean;
+  permissions?: Record<string, 'monitor' | 'estudante'>;
   missedTopics?: string[];
   totalSimulated?: number;
   totalCorrect?: number;
@@ -101,10 +167,19 @@ interface Question {
   id: string;
   text: string;
   topic: string;
+  course: string;
   options: string[];
   correctIndex: number;
   explanation: string;
   imageUrl?: string;
+}
+
+interface VideoClass {
+  id: string;
+  title: string;
+  youtubeUrl: string;
+  course: string;
+  date: string;
 }
 
 interface QuizResult {
@@ -112,6 +187,7 @@ interface QuizResult {
   date: string;
   total: number;
   score: number;
+  course?: string;
   answers: { questionId: string, selectedIndex: number }[];
   topicStats: {
     [topic: string]: {
@@ -126,14 +202,14 @@ interface QuizResult {
 
 // --- Initial Mock Data ---
 const INITIAL_QUESTIONS: Question[] = [
-  { id: '1', topic: 'Funções de 1º Grau', text: 'Qual é o valor do coeficiente angular da reta que passa pelos pontos A(1, 2) e B(3, 8)?', options: ['2', '3', '4', '6'], correctIndex: 1, explanation: 'O coeficiente angular (m) é dado por (y2 - y1) / (x2 - x1). Logo, (8 - 2) / (3 - 1) = 6 / 2 = 3.' },
-  { id: '2', topic: 'Trigonometria', text: 'Se sen(x) = 1/2 e x está no primeiro quadrante, qual o valor de cos(x)?', options: ['√3/2', '√2/2', '1/2', '0'], correctIndex: 0, explanation: 'Pela relação fundamental: sen²x + cos²x = 1. (1/2)² + cos²x = 1 -> 1/4 + cos²x = 1 -> cos²x = 3/4 -> cosx = √3/2.' },
-  { id: '3', topic: 'Probabilidade', text: 'Ao lançar um dado justo de 6 faces, qual a probabilidade de sair um número primo?', options: ['1/6', '1/3', '1/2', '2/3'], correctIndex: 2, explanation: 'Os números primos entre 1 e 6 são 2, 3 e 5. São 3 favoritos num total de 6 possibilidades. 3/6 = 1/2.' },
-  { id: '4', topic: 'Geometria Espacial', text: 'Qual o volume de um cilindro com raio da base 2cm e altura 5cm? (Considere π = 3)', options: ['30 cm³', '45 cm³', '60 cm³', '90 cm³'], correctIndex: 2, explanation: 'V = π * r² * h. V = 3 * 2² * 5 = 3 * 4 * 5 = 60 cm³.' },
-  { id: '5', topic: 'Estatística', text: 'Em um conjunto de dados {2, 2, 5, 7, 9}, qual é a mediana?', options: ['2', '5', '7', '9'], correctIndex: 1, explanation: 'A mediana é o valor central. Ordenado: 2, 2, 5, 7, 9. O valor central é 5.' },
-  { id: '6', topic: 'Logaritmos', text: 'Determine o valor de log₂ (32).', options: ['2', '4', '5', '6'], correctIndex: 2, explanation: 'log₂ (32) = x -> 2^x = 32. Como 32 = 2^5, então x = 5.' },
-  { id: '7', topic: 'Progressão Aritmética', text: 'Qual o 10º termo da PA (3, 7, 11, ...)?', options: ['36', '39', '43', '47'], correctIndex: 1, explanation: 'Usando a fórmula do termo geral: an = a1 + (n-1)r. a10 = 3 + (10-1)*4 = 3 + 36 = 39.' },
-  { id: '8', topic: 'Geometria Analítica', text: 'A distância entre os pontos (0,0) e (3,4) no plano cartesiano é:', options: ['3', '4', '5', '7'], correctIndex: 2, explanation: 'd = √((x2-x1)² + (y2-y1)²). d = √(3² + 4²) = √(9+16) = √25 = 5.' }
+  { id: '1', course: 'Matemática', topic: 'Funções de 1º Grau', text: 'Qual é o valor do coeficiente angular da reta que passa pelos pontos A(1, 2) e B(3, 8)?', options: ['2', '3', '4', '6'], correctIndex: 1, explanation: 'O coeficiente angular (m) é dado por (y2 - y1) / (x2 - x1). Logo, (8 - 2) / (3 - 1) = 6 / 2 = 3.' },
+  { id: '2', course: 'Matemática', topic: 'Trigonometria', text: 'Se sen(x) = 1/2 e x está no primeiro quadrante, qual o valor de cos(x)?', options: ['√3/2', '√2/2', '1/2', '0'], correctIndex: 0, explanation: 'Pela relação fundamental: sen²x + cos²x = 1. (1/2)² + cos²x = 1 -> 1/4 + cos²x = 1 -> cos²x = 3/4 -> cosx = √3/2.' },
+  { id: '3', course: 'Matemática', topic: 'Probabilidade', text: 'Ao lançar um dado justo de 6 faces, qual a probabilidade de sair um número primo?', options: ['1/6', '1/3', '1/2', '2/3'], correctIndex: 2, explanation: 'Os números primos entre 1 e 6 são 2, 3 e 5. São 3 favoritos num total de 6 possibilidades. 3/6 = 1/2.' },
+  { id: '4', course: 'Matemática', topic: 'Geometria Espacial', text: 'Qual o volume de um cilindro com raio da base 2cm e altura 5cm? (Considere π = 3)', options: ['30 cm³', '45 cm³', '60 cm³', '90 cm³'], correctIndex: 2, explanation: 'V = π * r² * h. V = 3 * 2² * 5 = 3 * 4 * 5 = 60 cm³.' },
+  { id: '5', course: 'Matemática', topic: 'Estatística', text: 'Em um conjunto de dados {2, 2, 5, 7, 9}, qual é a mediana?', options: ['2', '5', '7', '9'], correctIndex: 1, explanation: 'A mediana é o valor central. Ordenado: 2, 2, 5, 7, 9. O valor central é 5.' },
+  { id: '6', course: 'Matemática', topic: 'Logaritmos', text: 'Determine o valor de log₂ (32).', options: ['2', '4', '5', '6'], correctIndex: 2, explanation: 'log₂ (32) = x -> 2^x = 32. Como 32 = 2^5, então x = 5.' },
+  { id: '7', course: 'Matemática', topic: 'Progressão Aritmética', text: 'Qual o 10º termo da PA (3, 7, 11, ...)?', options: ['36', '39', '43', '47'], correctIndex: 1, explanation: 'Usando a fórmula do termo geral: an = a1 + (n-1)r. a10 = 3 + (10-1)*4 = 3 + 36 = 39.' },
+  { id: '8', course: 'Matemática', topic: 'Geometria Analítica', text: 'A distância entre os pontos (0,0) e (3,4) no plano cartesiano é:', options: ['3', '4', '5', '7'], correctIndex: 2, explanation: 'd = √((x2-x1)² + (y2-y1)²). d = √(3² + 4²) = √(9+16) = √25 = 5.' }
 ];
 
 // --- Sub-Components (Standard HTML/Tailwind) ---
@@ -144,10 +220,11 @@ const Card = ({ children, className = "" }: { children: React.ReactNode, classNa
   </div>
 );
 
-const Badge = ({ children, color = "indigo" }: { children: React.ReactNode, color?: "indigo" | "emerald" | "amber" | "rose" }) => {
+const Badge = ({ children, color = "indigo" }: { children: React.ReactNode, color?: "indigo" | "emerald" | "amber" | "rose" | "violet" }) => {
   const colors = {
     indigo: "bg-indigo-50 text-indigo-600 border-indigo-100",
     emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    violet: "bg-violet-50 text-violet-600 border-violet-100",
     amber: "bg-amber-50 text-amber-600 border-amber-100",
     rose: "bg-rose-50 text-rose-600 border-rose-100"
   };
@@ -170,13 +247,38 @@ export default function App() {
 
   // --- App State ---
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor'>('dashboard');
+  const [activeCourse, setActiveCourse] = useState<Course>('Matemática');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor' | 'videos'>('dashboard');
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [videos, setVideos] = useState<VideoClass[]>([]);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
   const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[] } | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [targetCourse, setTargetCourse] = useState<Course | null>(null);
 
   const [isFinishing, setIsFinishing] = useState(false);
+
+  const handleCourseSwitch = (course: Course) => {
+    if (course === activeCourse) {
+      setShowMenu(false);
+      return;
+    }
+    setTargetCourse(course);
+    setIsTransitioning(true);
+    setShowMenu(false);
+    
+    // Simulate cutscene duration
+    setTimeout(() => {
+      setActiveCourse(course);
+      setCurrentView('dashboard');
+      setTimeout(() => {
+        setIsTransitioning(false);
+        setTargetCourse(null);
+      }, 800);
+    }, 1200);
+  };
 
   // 1. Sync Profile in real-time
   useEffect(() => {
@@ -202,27 +304,48 @@ export default function App() {
     return () => unsub();
   }, [sessionEmail]);
 
-  // 2. Sync Questions in real-time
+  // 2. Sync Questions in real-time (filtered by course)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'questions'), (snap) => {
-      const qData = snap.docs.map(d => ({ ...d.data(), id: d.id } as Question));
+      const qData = snap.docs
+        .map(d => ({ ...d.data(), id: d.id } as Question))
+        .filter(q => {
+          // Se não houver campo 'course', trata como 'Matemática'
+          const course = q.course || 'Matemática';
+          return course === activeCourse;
+        });
       setQuestions(qData);
     });
     return () => unsub();
-  }, []);
+  }, [activeCourse]);
+
+  // 2.5 Sync Videos (filtered by course)
+  useEffect(() => {
+    const unsubVideos = onSnapshot(collection(db, 'videos'), (snap) => {
+      const vData = snap.docs
+        .map(d => ({ ...d.data(), id: d.id } as VideoClass))
+        .filter(v => {
+          const course = v.course || 'Matemática';
+          return course === activeCourse;
+        })
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setVideos(vData);
+    });
+    return () => unsubVideos();
+  }, [activeCourse]);
 
   // 3. Sync All Users (for Monitor View)
   useEffect(() => {
-    if (profile?.role === 'monitor') {
+    if (profile?.role === 'monitor' || profile?.permissions?.[activeCourse] === 'monitor' || profile?.email === 'brennomcpe10@gmail.com') {
       const unsub = onSnapshot(collection(db, 'users'), (snap) => {
         const uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
         setAllUsers(uData);
       });
       return () => unsub();
     }
-  }, [profile?.role]);
+  }, [profile?.role, profile?.permissions, activeCourse]);
 
-  // 4. Sync Personal Results
+  // 4. Sync Personal Results (filtered by course)
   useEffect(() => {
     if (profile) {
       const q = query(
@@ -232,7 +355,9 @@ export default function App() {
       );
 
       const unsub = onSnapshot(q, (snap) => {
-        const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
+        const rData = snap.docs
+          .map(d => ({ ...d.data(), id: d.id } as QuizResult))
+          .filter(r => (r.course || 'Matemática') === activeCourse);
         setUserResults(rData);
       }, (error) => {
         console.error('Error fetching personal results:', error);
@@ -248,10 +373,12 @@ export default function App() {
 
   // 5. Sync All Results (System Dashboard for Monitors)
   useEffect(() => {
-    if (profile?.role === 'monitor') {
+    if (profile?.role === 'monitor' || profile?.permissions?.[activeCourse] === 'monitor' || profile?.email === 'brennomcpe10@gmail.com') {
       const q = query(collection(db, 'results'), orderBy('date', 'desc'));
       const unsub = onSnapshot(q, (snap) => {
-        const rData = snap.docs.map(d => ({ ...d.data(), id: d.id } as QuizResult));
+        const rData = snap.docs
+          .map(d => ({ ...d.data(), id: d.id } as QuizResult))
+          .filter(r => (r.course || 'Matemática') === activeCourse);
         setSystemResults(rData);
       }, (error) => {
         console.error('Error fetching system results:', error);
@@ -260,7 +387,7 @@ export default function App() {
     } else {
       setSystemResults([]);
     }
-  }, [profile?.role]);
+  }, [profile?.role, profile?.permissions, activeCourse]);
 
   // Logout
   const handleLogout = () => {
@@ -375,32 +502,87 @@ export default function App() {
     );
   }
 
+  const theme = COURSE_THEMES[activeCourse];
+  const targetTheme = targetCourse ? COURSE_THEMES[targetCourse] : theme;
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans selection:bg-indigo-100">
+    <div className={`min-h-screen bg-slate-50 font-sans selection:bg-${theme.primary}-100`}>
       {/* Navbar */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100 px-6 h-20 flex items-center">
         <div className="max-w-7xl mx-auto w-full flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentView('dashboard')}>
-            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/30">
-              <Calculator className="w-6 h-6" />
+            <div className={`w-12 h-12 ${theme.classes.bg} rounded-2xl flex items-center justify-center text-white shadow-lg ${theme.classes.shadow}`}>
+              <theme.icon className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-black tracking-tighter">Monitoria <span className="text-indigo-600">3º C</span></h2>
-              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600/50">Matemática Ninja</p>
+              <h2 className="text-xl font-black tracking-tighter">Monitoria <span className={theme.classes.text}>3º C</span></h2>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>{theme.title}</p>
             </div>
           </div>
 
           <nav className="hidden md:flex items-center gap-2">
             <button 
-              onClick={() => setCurrentView('dashboard')}
-              className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 px-6' : 'text-slate-400 hover:text-slate-600'}`}
+              onClick={() => { setCurrentView('dashboard'); setShowMenu(false); }}
+              className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'dashboard' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
             >
               <LayoutDashboard className="w-4 h-4" /> Início
             </button>
-            {profile.role === 'monitor' && (
+
+            <div className="relative">
               <button 
-                onClick={() => setCurrentView('monitor')}
-                className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'monitor' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 px-6' : 'text-slate-400 hover:text-slate-600'}`}
+                onClick={() => setShowMenu(!showMenu)}
+                className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${showMenu || currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <Menu className="w-4 h-4" /> Menu
+              </button>
+              
+              <AnimatePresence>
+                {showMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)}></div>
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-64 bg-white rounded-3xl shadow-2xl border border-slate-100 p-2 z-50 overflow-hidden"
+                    >
+                       <button 
+                         onClick={() => { setCurrentView('videos'); setShowMenu(false); }}
+                         className={`flex items-center gap-3 w-full p-4 rounded-2xl ${theme.classes.hoverBg} text-slate-600 hover:${theme.classes.text} transition-all text-left`}
+                       >
+                         <div className={`w-10 h-10 ${theme.classes.lightBg} rounded-xl flex items-center justify-center ${theme.classes.text}`}>
+                           <Youtube className="w-5 h-5" />
+                         </div>
+                         <div>
+                           <p className="font-black text-sm">Videoaulas</p>
+                           <p className="text-[10px] font-medium text-slate-400 leading-none">Aulas gravadas</p>
+                         </div>
+                       </button>
+
+                       <div className="mx-4 my-2 h-px bg-slate-50"></div>
+                       <p className="px-4 py-2 text-[10px] font-black text-slate-300 uppercase tracking-widest">Trocar de Curso</p>
+                       {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map(c => (
+                         <button 
+                           key={c}
+                           onClick={() => handleCourseSwitch(c)}
+                           className={`flex items-center gap-3 w-full p-4 rounded-2xl transition-all text-left ${activeCourse === c ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow}` : `hover:bg-slate-50 text-slate-600 hover:${theme.classes.text}`}`}
+                         >
+                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${activeCourse === c ? 'bg-white/20' : 'bg-slate-100 text-slate-400'}`}>
+                             {React.createElement(COURSE_THEMES[c].icon, { className: "w-4 h-4" })}
+                           </div>
+                           <p className="font-black text-sm">{c}</p>
+                         </button>
+                       ))}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {(profile.role === 'monitor' || profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com') && (
+              <button 
+                onClick={() => { setCurrentView('monitor'); setShowMenu(false); }}
+                className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
               >
                 <Users className="w-4 h-4" /> Monitoria
               </button>
@@ -429,13 +611,20 @@ export default function App() {
             transition={{ duration: 0.2 }}
           >
             {currentView === 'dashboard' && (
-              <Dashboard results={userResults} onStart={(c, t) => { setQuizConfig({count:c, topics:t}); setCurrentView('quiz'); }} questions={questions} profile={profile} />
+              <Dashboard 
+                results={userResults} 
+                onStart={(c, t) => { setQuizConfig({count:c, topics:t}); setCurrentView('quiz'); }} 
+                questions={questions} 
+                profile={profile!} 
+                activeCourse={activeCourse} 
+              />
             )}
             {currentView === 'quiz' && quizConfig && (
               <QuizView 
                 config={quizConfig} 
                 allQuestions={questions} 
                 profile={profile}
+                activeCourse={activeCourse}
                 isSyncing={isFinishing}
                 onFinish={async (res: QuizResult | null) => { 
                   if (res) {
@@ -446,7 +635,8 @@ export default function App() {
                       const resultData = { 
                         ...res, 
                         userEmail: profile.email,
-                        userName: profile.name 
+                        userName: profile.name,
+                        course: activeCourse
                       };
                       await setDoc(doc(db, 'results', resId), resultData);
                       
@@ -485,13 +675,44 @@ export default function App() {
               <MonitorView 
                 results={systemResults} 
                 questions={questions} 
+                videos={videos}
                 allUsers={allUsers} 
+                activeCourse={activeCourse}
                 isAdmin={profile.email === 'brennomcpe10@gmail.com'}
               />
+            )}
+            {currentView === 'videos' && (
+              <VideosView videos={videos} activeCourse={activeCourse} />
             )}
           </motion.div>
         </AnimatePresence>
       </main>
+      
+      {/* Cutscene Transition Overlay */}
+      <AnimatePresence>
+        {isTransitioning && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={`fixed inset-0 z-[100] flex items-center justify-center bg-white`}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 1.1, opacity: 0 }}
+              className="flex flex-col items-center text-center"
+            >
+              <div className={`w-24 h-24 rounded-[2rem] ${targetTheme.classes.bg} flex items-center justify-center text-white shadow-2xl ${targetTheme.classes.shadow} mb-8`}>
+                {React.createElement(targetTheme.icon, { className: "w-12 h-12" })}
+              </div>
+              <h2 className="text-4xl font-black text-slate-900 tracking-tight italic uppercase">{targetCourse}</h2>
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-2">Carregando Módulos...</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Toaster richColors position="top-center" />
     </div>
   );
@@ -499,29 +720,99 @@ export default function App() {
 
 // --- Views ---
 
-function Dashboard({ results, onStart, questions, profile }: any) {
+function VideosView({ videos, activeCourse }: { videos: VideoClass[], activeCourse: Course }) {
+  const theme = COURSE_THEMES[activeCourse];
+  const getYTId = (url: string) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  return (
+    <div className="space-y-10 animate-in fade-in duration-500">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none italic uppercase">Videoaulas Gravadas</h2>
+        <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">{activeCourse} • Reforce seu aprendizado</p>
+      </div>
+
+      {videos.length > 0 ? (
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          {videos.map((v) => {
+            const ytId = getYTId(v.youtubeUrl);
+            const thumb = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : null;
+            return (
+              <div key={v.id}>
+                <Card className={`group hover:shadow-2xl hover:${theme.classes.shadow} transition-all border-none`}>
+                   <div className="relative aspect-video overflow-hidden">
+                   {thumb ? (
+                     <img src={thumb} alt={v.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                   ) : (
+                     <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                       <Youtube className="w-12 h-12" />
+                     </div>
+                   )}
+                   <a 
+                     href={v.youtubeUrl} 
+                     target="_blank" 
+                     rel="noreferrer"
+                     className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm"
+                   >
+                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-rose-600 shadow-2xl scale-75 group-hover:scale-100 transition-transform duration-300">
+                       <Play className="w-8 h-8 fill-rose-600" />
+                     </div>
+                   </a>
+                   <div className="absolute top-4 left-4">
+                     <Badge color="rose">Aula</Badge>
+                   </div>
+                 </div>
+                 <div className="p-6 space-y-2">
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(v.date).toLocaleDateString('pt-BR')}</p>
+                   <h3 className="text-lg font-black text-slate-800 leading-tight group-hover:text-indigo-600 transition-colors">{v.title}</h3>
+                   <a 
+                     href={v.youtubeUrl} 
+                     target="_blank" 
+                     rel="noreferrer"
+                     className="text-indigo-600 text-xs font-bold flex items-center gap-1 hover:underline"
+                   >
+                     Assistir no Youtube <ExternalLink className="w-3 h-3" />
+                   </a>
+                 </div>
+              </Card>
+            </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="py-20 text-center space-y-4">
+          <Youtube className="w-20 h-20 text-slate-100 mx-auto" />
+          <p className="text-slate-300 font-bold italic text-lg">Nenhuma videoaula disponível no momento.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ results, onStart, questions, profile, activeCourse }: { results: QuizResult[], onStart: (count: number, topics: string[]) => void, questions: Question[], profile: UserProfile, activeCourse: Course }) {
   const [selectedCount, setSelectedCount] = useState(10);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]); // Empty = Todos
   
   if (!profile) return null;
 
-  const isMonitor = profile.role === 'monitor';
+  const theme = COURSE_THEMES[activeCourse];
+  const isMonitor = profile.role === 'monitor' || profile.permissions?.[activeCourse] === 'monitor';
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  // Prioritize personal latestResult if it exists, else use the most recent from results array (which is already filtered by userEmail)
-  const latestResult = profile.latestResult || (results && results.length > 0 ? {
+  const latestResult = results && results.length > 0 ? {
     score: results[0].score,
     total: results[0].total,
     date: results[0].date,
     topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
-  } : null);
+  } : null;
 
-  const totalQuizzes = profile.totalSimulated || (results ? results.length : 0);
+  const totalQuizzes = results ? results.length : 0;
   
   let acc = "0";
-  if (profile.totalQuestions && profile.totalQuestions > 0) {
-    acc = ((profile.totalCorrect || 0) / profile.totalQuestions * 100).toFixed(0);
-  } else if (results && results.length > 0) {
+  if (results && results.length > 0) {
     const totalScore = results.reduce((a: any, b: any) => a + (b.score || 0), 0);
     const totalPossible = results.reduce((a: any, b: any) => a + (b.total || 0), 0);
     if (totalPossible > 0) acc = ((totalScore / totalPossible) * 100).toFixed(0);
@@ -530,20 +821,20 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   return (
     <div className="space-y-8">
       <div className="grid gap-6 md:grid-cols-3">
-        <div className="relative overflow-hidden bg-indigo-600 rounded-[2.5rem] p-10 text-white shadow-2xl shadow-indigo-600/20 md:col-span-2">
+        <div className={`relative overflow-hidden ${theme.classes.bg} rounded-[2.5rem] p-10 text-white shadow-2xl ${theme.classes.shadow} md:col-span-2`}>
           <div className="absolute right-0 top-0 w-80 h-80 bg-white/10 blur-[100px] rounded-full translate-x-1/3 -translate-y-1/3"></div>
           <div className="relative z-10 flex flex-col h-full">
             <h2 className="text-4xl font-black mb-2 leading-none tracking-tight">Opa, {profile.name}! 👋</h2>
-            <p className="text-indigo-100 font-medium mb-10">Mantenha o foco. O aprendizado é degrau por degrau.</p>
+            <p className="opacity-80 font-medium mb-10">Mantenha o foco. O aprendizado é degrau por degrau.</p>
             <div className="mt-auto grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Simulados</p><p className="text-3xl font-black">{totalQuizzes}</p></div>
-              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">{isMonitor ? 'Média Geral' : 'Precisão'}</p><p className="text-3xl font-black text-indigo-100">{acc}%</p></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Simulados</p><p className="text-3xl font-black">{totalQuizzes}</p></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">{isMonitor ? 'Média Geral' : 'Precisão'}</p><p className="text-3xl font-black opacity-90">{acc}%</p></div>
             </div>
           </div>
         </div>
 
         <Card className="flex flex-col p-8">
-          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-5 h-5 text-indigo-600" /> Último Desempenho</h3>
+          <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className={`w-5 h-5 ${theme.classes.text}`} /> Último Desempenho</h3>
           {latestResult ? (
             <div className="space-y-6">
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-3xl border border-slate-100">
@@ -560,14 +851,14 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                     />
                     <circle 
                       cx="32" cy="32" r="28" 
-                      className="stroke-indigo-600 fill-none transition-all duration-1000" 
+                      className={`${theme.classes.primary === 'indigo' ? 'stroke-indigo-600' : theme.classes.primary === 'emerald' ? 'stroke-emerald-600' : 'stroke-violet-600'} fill-none transition-all duration-1000`} 
                       strokeWidth="6" 
                       strokeDasharray={175.9} 
                       strokeDashoffset={175.9 - (175.9 * (latestResult.score / latestResult.total))}
                       strokeLinecap="round"
                     />
                   </svg>
-                  <div className="absolute font-black text-[10px] text-indigo-600">
+                  <div className={`absolute font-black text-[10px] ${theme.classes.text}`}>
                     {((latestResult.score / latestResult.total) * 100).toFixed(0)}%
                   </div>
                 </div>
@@ -588,8 +879,8 @@ function Dashboard({ results, onStart, questions, profile }: any) {
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="space-y-6">
            <div className="flex items-center justify-between">
-             <h3 className="text-xl font-bold flex items-center gap-2">Configurar Simulado</h3>
-             <Badge color="indigo">Beta v1.0</Badge>
+              <h3 className="text-xl font-bold flex items-center gap-2">Configurar Simulado</h3>
+              <Badge color={theme.primary as any}>Beta v1.0</Badge>
            </div>
            
            <Card className="p-8 space-y-8">
@@ -597,7 +888,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                 <label className="text-sm font-black uppercase tracking-widest text-slate-400">Questões</label>
                 <div className="grid grid-cols-4 gap-3">
                   {[5, 10, 15, 20].map(c => (
-                    <button key={c} onClick={() => setSelectedCount(c)} className={`h-12 rounded-2xl font-black transition-all ${selectedCount === c ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-600 ring-offset-2' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 shadow-sm border border-slate-100'}`}>
+                    <button key={c} onClick={() => setSelectedCount(c)} className={`h-12 rounded-2xl font-black transition-all ${selectedCount === c ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} ring-2 ring-offset-2 ${theme.classes.primary === 'indigo' ? 'ring-indigo-600' : theme.classes.primary === 'emerald' ? 'ring-emerald-600' : 'ring-violet-600'}` : 'bg-slate-50 text-slate-500 hover:bg-slate-100 shadow-sm border border-slate-100'}`}>
                       {c}
                     </button>
                   ))}
@@ -609,7 +900,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                 <div className="flex flex-wrap gap-2">
                   <button 
                     onClick={() => setSelectedTopics([])} 
-                    className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.length === 0 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                    className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.length === 0 ? `${theme.classes.bg} text-white border-none` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
                   >
                     Todos
                   </button>
@@ -626,7 +917,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                           }
                         });
                       }} 
-                      className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.includes(t) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                      className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.includes(t) ? `${theme.classes.bg} text-white border-none` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
                     >
                       {t}
                     </button>
@@ -636,7 +927,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
 
               <button 
                 onClick={() => onStart(selectedCount, selectedTopics)}
-                className="w-full h-16 bg-emerald-500 text-white rounded-[1.5rem] font-black text-xl shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                className={`w-full h-16 ${theme.classes.bg} text-white rounded-[1.5rem] font-black text-xl shadow-xl ${theme.classes.shadow} ${theme.classes.darkHover} active:scale-[0.98] transition-all flex items-center justify-center gap-2`}
               >
                 <Play className="w-6 h-6 fill-white" /> Iniciar Agora
               </button>
@@ -645,7 +936,7 @@ function Dashboard({ results, onStart, questions, profile }: any) {
 
         <div className="space-y-6">
            <h3 className="text-xl font-bold flex items-center gap-2">Pontos Fracos</h3>
-           <Card className="p-8 flex flex-col h-full bg-slate-900 text-white border-none shadow-indigo-600/10">
+           <Card className={`p-8 flex flex-col h-full bg-slate-900 text-white border-none shadow-lg ${theme.classes.shadow}`}>
               <p className="text-slate-400 text-sm mb-8">Assuntos que você precisa reforçar de acordo com seus erros.</p>
               {profile.missedTopics && profile.missedTopics.length > 0 ? (
                 <div className="space-y-6 flex-1">
@@ -655,10 +946,10 @@ function Dashboard({ results, onStart, questions, profile }: any) {
                     }, {})).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([topic, count]: any) => (
                       <div key={topic} className="flex items-center justify-between group">
                         <div className="flex items-center gap-3">
-                          <div className="w-2 h-2 rounded-full bg-rose-500 group-hover:scale-150 transition-all"></div>
+                          <div className={`w-2 h-2 rounded-full ${theme.classes.bg} group-hover:scale-150 transition-all`}></div>
                           <span className="font-bold text-slate-200">{topic}</span>
                         </div>
-                        <span className="text-xs font-black text-rose-500">{count} {count === 1 ? 'erro' : 'erros'}</span>
+                        <span className={`text-xs font-black ${theme.classes.text}`}>{count} {count === 1 ? 'erro' : 'erros'}</span>
                       </div>
                     ))}
                 </div>
@@ -674,7 +965,8 @@ function Dashboard({ results, onStart, questions, profile }: any) {
   );
 }
 
-function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
+function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCourse }: any) {
+  const theme = COURSE_THEMES[activeCourse as Course];
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
   const [ans, setAns] = useState<(number | null)[]>([]);
@@ -722,7 +1014,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
     }, 800);
   }, []);
 
-  if (loading) return <div className="flex flex-col items-center justify-center py-40"><Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" /><p className="font-bold text-slate-400">Embaralhando questões...</p></div>;
+  if (loading) return <div className="flex flex-col items-center justify-center py-40 animate-pulse"><Loader2 className={`w-12 h-12 animate-spin ${theme.classes.text} mb-4`} /><p className="font-black text-slate-400 uppercase tracking-widest text-[10px]">Embaralhando questões...</p></div>;
 
   if (finished) {
     const score = ans.reduce((acc: number, v, i) => {
@@ -733,6 +1025,8 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
     const result: QuizResult = {
       id: Math.random().toString(36).substring(2, 11),
       date: new Date().toISOString(),
+      major: activeCourse,
+      course: activeCourse,
       total: questions.length,
       score,
       answers: questions.map((q, i) => ({ questionId: q.id, selectedIndex: ans[i] as number })),
@@ -746,18 +1040,18 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
     };
 
     return (
-      <div className="max-w-3xl mx-auto space-y-10">
+      <div className="max-w-3xl mx-auto space-y-10 animate-in fade-in zoom-in-95 duration-500">
         <div className="rounded-[2.5rem] bg-white shadow-2xl overflow-hidden text-center border border-slate-100">
-           <div className="bg-indigo-600 p-16 text-white relative">
+           <div className={`p-16 text-white relative ${theme.classes.bg}`}>
               <CheckCircle2 className="mx-auto w-16 h-16 mb-6 scale-110" />
               <h2 className="text-4xl font-black mb-2 italic">TAMO JUNTO!</h2>
-              <p className="text-indigo-200 font-bold uppercase tracking-widest text-xs">Simulado concluído com sucesso</p>
+              <p className="opacity-70 font-bold uppercase tracking-widest text-[10px]">Simulado concluído com sucesso</p>
            </div>
            <div className="p-12 relative -mt-10 bg-white rounded-[2rem] mx-8 shadow-xl grid md:grid-cols-2 lg:grid-cols-3 gap-10 items-center">
               <div className="lg:col-span-1 border-r border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pontuação</p>
-                <div className="text-6xl font-black text-indigo-600">{score}/{questions.length}</div>
-                <Badge color="indigo">{questions.length > 0 ? ((score / questions.length) * 100).toFixed(0) : 0}% Acertos</Badge>
+                <div className={`text-6xl font-black ${theme.classes.text}`}>{score}/{questions.length}</div>
+                <Badge color={theme.primary as any}>{questions.length > 0 ? ((score / questions.length) * 100).toFixed(0) : 0}% Acertos</Badge>
               </div>
               <div className="text-left md:col-span-1 lg:col-span-2 space-y-4">
                  <h4 className="font-bold text-slate-500 uppercase text-xs tracking-widest flex items-center gap-2"><Target className="w-4 h-4" /> Desempenho</h4>
@@ -769,7 +1063,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
                           <span className="text-slate-400">{(s.total - s.errors)}/{s.total}</span>
                         </div>
                         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-600" style={{ width: `${s.total > 0 ? ((s.total - s.errors) / s.total) * 100 : 0}%` }}></div>
+                          <div className={`h-full ${theme.classes.bg}`} style={{ width: `${s.total > 0 ? ((s.total - s.errors) / s.total) * 100 : 0}%` }}></div>
                         </div>
                       </div>
                    ))}
@@ -780,7 +1074,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
              <button 
                disabled={isSyncing}
                onClick={(e) => { e.preventDefault(); onFinish(result); }} 
-               className="h-16 w-full lg:w-fit lg:px-20 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
+               className={`h-16 w-full lg:w-fit lg:px-20 ${theme.classes.bg} text-white rounded-2xl font-black text-lg shadow-xl ${theme.classes.shadow} ${theme.classes.darkHover} active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70`}
              >
                {isSyncing ? <><Loader2 className="w-5 h-5 animate-spin" /> Salvando...</> : 'Voltar para o Início'}
              </button>
@@ -793,7 +1087,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
             <div key={q.id}>
               <Card className={`p-8 border-l-[10px] ${ans[i] === q.correctIndex ? 'border-l-emerald-500' : 'border-l-rose-500'}`}>
               <div className="flex items-center justify-between mb-6">
-                <Badge>{q.topic}</Badge>
+                <Badge color={theme.primary as any}>{q.topic}</Badge>
                 {ans[i] === q.correctIndex 
                   ? <span className="flex items-center gap-1 text-emerald-600 font-bold text-sm"><CheckCircle2 className="w-4 h-4" /> Correto</span>
                   : <span className="flex items-center gap-1 text-rose-600 font-bold text-sm"><XCircle className="w-4 h-4" /> Errou feio</span>
@@ -807,8 +1101,8 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
                   </div>
                 ))}
               </div>
-              <div className="bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100 italic text-indigo-700">
-                 <div className="flex items-center gap-2 font-black text-indigo-800 mb-2 uppercase text-[10px] tracking-widest"><Lightbulb className="w-4 h-4" /> Comentário do Monitor</div>
+              <div className={`${theme.classes.lightBg} p-6 rounded-3xl border border-dashed border-opacity-20 italic ${theme.classes.text}`}>
+                 <div className="flex items-center gap-2 font-black opacity-80 mb-2 uppercase text-[10px] tracking-widest"><Lightbulb className="w-4 h-4" /> Comentário do Monitor</div>
                  <p className="text-sm leading-relaxed">{q.explanation}</p>
               </div>
             </Card>
@@ -903,9 +1197,11 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing }: any) {
   );
 }
 
-function MonitorView({ results, questions, allUsers, isAdmin }: any) {
+function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean }) {
+  const theme = COURSE_THEMES[activeCourse];
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
   const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+  const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [bulkJson, setBulkJson] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -1067,7 +1363,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     
     try {
       const id = editingId || Math.random().toString(36).substring(2, 11);
-      await setDoc(doc(db, 'questions', id), { ...newQ, id });
+      await setDoc(doc(db, 'questions', id), { ...newQ, id, course: activeCourse });
       toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
       setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
       setEditingId(null);
@@ -1110,7 +1406,8 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
           options: q.options || q.opcoes || q.alternativas || ['', '', '', ''],
           correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : (typeof q.correta === 'number' ? q.correta : (typeof q.resposta === 'number' ? q.resposta : 0)),
           explanation: q.explanation || q.explicacao || q.correcao || '',
-          imageUrl: q.imageUrl || ''
+          imageUrl: q.imageUrl || '',
+          course: activeCourse
         };
         
         await setDoc(doc(db, 'questions', id), questionData);
@@ -1127,16 +1424,40 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
     }
   };
 
+  const handleAddVideo = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newVideo.title || !newVideo.youtubeUrl) return toast.error('Preencha os campos da videoaula!');
+    try {
+      const id = Math.random().toString(36).substring(2, 11);
+      await setDoc(doc(db, 'videos', id), { ...newVideo, id, date: new Date().toISOString(), course: activeCourse });
+      toast.success('Videoaula cadastrada!');
+      setNewVideo({ title: '', youtubeUrl: '' });
+    } catch (e) {
+      toast.error('Erro ao salvar videoaula.');
+    }
+  };
+
+  const handleDeleteVideo = async (id: string) => {
+    if (confirm('Excluir esta videoaula?')) {
+      try {
+        await deleteDoc(doc(db, 'videos', id));
+        toast.success('Videoaula removida.');
+      } catch (e) {
+        toast.error('Erro ao remover videoaula.');
+      }
+    }
+  };
+
   return (
-    <div className="space-y-10">
+    <div className="space-y-10 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-2 underline decoration-indigo-600 decoration-8 underline-offset-4">Painel do Monitor</h2>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • 3º Ano C</p>
+          <h2 className={`text-4xl font-black text-slate-900 tracking-tight leading-none mb-2 underline ${theme.classes.decoration} decoration-8 underline-offset-4`}>Painel do Monitor</h2>
+          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
-        <div className="bg-slate-200/50 p-1.5 rounded-2xl flex gap-1 w-fit">
+        <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
            {(['stats', 'list', 'add', 'users'] as const).map(t => (
-             <button key={t} onClick={() => setActiveTab(t as any)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${activeTab === t ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>
+             <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
                {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : 'Usuários'}
              </button>
            ))}
@@ -1178,7 +1499,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                            <div className="flex flex-col">
                              <span className="text-sm font-black text-slate-700">{u.totalSimulated || 0}</span>
                              {u.totalQuestions ? (
-                               <span className="text-[10px] font-bold text-indigo-500">
+                               <span className={`text-[10px] font-bold ${theme.classes.text}`}>
                                  {((u.totalCorrect || 0) / u.totalQuestions * 100).toFixed(0)}% de acerto
                                </span>
                              ) : (
@@ -1188,7 +1509,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                         </td>
                         <td className="px-8 py-6">
                           {u.approved ? (
-                            <Badge color={u.role === 'monitor' ? 'indigo' : 'emerald'}>{u.role}</Badge>
+                            <Badge color={u.role === 'monitor' ? theme.primary as any : 'emerald'}>{u.role}</Badge>
                           ) : (
                             <span className="flex items-center gap-1.5 text-amber-500 text-[10px] font-black uppercase tracking-widest">
                               <Loader2 className="w-3 h-3 animate-spin" /> Pendente
@@ -1201,7 +1522,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                               <>
                                 <button 
                                   onClick={() => setSelectedStudent(u.email)}
-                                  className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
+                                  className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase transition-all ${theme.classes.lightBg} ${theme.classes.text} hover:opacity-80`}
                                 >
                                   Ver Detalhes
                                 </button>
@@ -1226,7 +1547,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                                  {isAdmin && (
                                   <button 
                                     onClick={() => handleApprove(u.email, 'monitor')}
-                                    className="h-8 px-3 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100"
+                                    className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase transition-all ${theme.classes.lightBg} ${theme.classes.text} hover:opacity-80`}
                                   >
                                     Aprovar Monitor
                                   </button>
@@ -1502,8 +1823,8 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       )}
 
       {activeTab === 'list' && (
-        <div className="space-y-6 relative">
-          <div className="flex items-center justify-between">
+        <div className="space-y-8 animate-in fade-in zoom-in-95 duration-200">
+           <div className="flex items-center justify-between">
              <div className="flex items-center gap-4">
                <h3 className="text-xl font-bold flex items-center gap-2 font-black italic tracking-tighter"><ClipboardList className="w-5 h-5 text-indigo-600" /> Banco de Questões</h3>
                {selectedIds.size > 0 && (
@@ -1651,7 +1972,7 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
       )}
 
       {activeTab === 'add' && (
-        <div className="max-w-3xl mx-auto animate-in zoom-in-95 duration-200">
+        <div className="max-w-3xl mx-auto space-y-12 animate-in zoom-in-95 duration-200">
           <Card className="p-10 md:p-14">
              <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
                <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
@@ -1696,36 +2017,83 @@ function MonitorView({ results, questions, allUsers, isAdmin }: any) {
                </button>
              </form>
           </Card>
+
+          {/* Bulk Import Tool */}
+          <Card className="p-10 bg-slate-50 border-dashed border-2 border-slate-200">
+            <div className="flex items-center gap-3 mb-6">
+              <ClipboardList className="w-6 h-6 text-indigo-600" />
+              <h3 className="text-xl font-black text-slate-800">Importação em Massa</h3>
+            </div>
+            <p className="text-sm text-slate-500 mb-6 font-medium">
+              Cole abaixo uma lista de questões em formato JSON para cadastrá-las instantaneamente.
+            </p>
+            <textarea
+              rows={6}
+              className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-mono text-xs mb-6"
+              placeholder='[ { "pergunta": "Pergunta?", "assunto": "Assunto", "opcoes": ["A", "B", "C", "D"], "correta": 0, "explicacao": "Explicação" }, ... ]'
+              value={bulkJson}
+              onChange={(e) => setBulkJson(e.target.value)}
+            />
+            <button
+              onClick={handleBulkImport}
+              disabled={isImporting}
+              className="h-16 w-full bg-slate-800 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-slate-900 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              {isImporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlusCircle className="w-5 h-5" />}
+              Importar Lista de Questões
+            </button>
+          </Card>
+
+          {/* Cadastrar Videoaula Form */}
+          <Card className="p-10 bg-rose-50/30 border-dashed border-2 border-rose-200">
+             <div className="flex items-center gap-3 mb-6">
+                <Youtube className="w-6 h-6 text-rose-600" />
+                <h3 className="text-xl font-black text-slate-800">Cadastrar Videoaula</h3>
+             </div>
+             
+             <form onSubmit={handleAddVideo} className="grid md:grid-cols-2 gap-4">
+               <div className="space-y-1">
+                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Título da Aula</label>
+                 <input 
+                   className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
+                   value={newVideo.title} onChange={e => setNewVideo({...newVideo, title: e.target.value})} placeholder="Ex: Introdução à Trigonometria" 
+                 />
+               </div>
+               <div className="space-y-1">
+                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Link do YouTube</label>
+                 <div className="flex gap-2">
+                    <input 
+                      className="flex-1 h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
+                      value={newVideo.youtubeUrl} onChange={e => setNewVideo({...newVideo, youtubeUrl: e.target.value})} placeholder="https://youtube.com/watch?v=..." 
+                    />
+                    <button type="submit" className="px-8 h-12 bg-rose-600 text-white rounded-2xl font-black shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all text-xs uppercase tracking-widest">Salvar Aula</button>
+                 </div>
+               </div>
+             </form>
+
+             {videos.length > 0 && (
+               <div className="mt-8 grid gap-2">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-2">Aulas Atuais</p>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {videos.map((v: any) => (
+                      <div key={v.id} className="p-4 bg-white rounded-2xl border border-slate-100 flex items-center justify-between group">
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600 flex-shrink-0">
+                            <Youtube className="w-4 h-4" />
+                          </div>
+                          <p className="font-bold text-slate-700 text-xs truncate">{v.title}</p>
+                        </div>
+                        <button onClick={() => handleDeleteVideo(v.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+               </div>
+             )}
+          </Card>
         </div>
       )}
-
-      {/* Bulk Import Tool */}
-      <div className="mt-20 pt-10 border-t-2 border-slate-100 italic">
-        <Card className="p-10 bg-slate-50 border-dashed border-2 border-slate-200">
-          <div className="flex items-center gap-3 mb-6">
-            <ClipboardList className="w-6 h-6 text-indigo-600" />
-            <h3 className="text-xl font-black text-slate-800">Ferramenta de Importação em Massa</h3>
-          </div>
-          <p className="text-sm text-slate-500 mb-6 font-medium">
-            Cole abaixo uma lista de questões em formato JSON para cadastrá-las instantaneamente no banco de dados.
-          </p>
-          <textarea
-            rows={10}
-            className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-mono text-xs mb-6"
-            placeholder='[ { "pergunta": "Pergunta?", "assunto": "Assunto", "opcoes": ["A", "B", "C", "D"], "correta": 0, "explicacao": "Explicação" }, ... ]'
-            value={bulkJson}
-            onChange={(e) => setBulkJson(e.target.value)}
-          />
-          <button
-            onClick={handleBulkImport}
-            disabled={isImporting}
-            className="h-16 px-10 bg-slate-800 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-slate-900 active:scale-95 transition-all flex items-center gap-3 disabled:opacity-50"
-          >
-            {isImporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlusCircle className="w-5 h-5" />}
-            Importar Lista de Questões
-          </button>
-        </Card>
-      </div>
 
       <AnimatePresence>
         {showBulkDeleteModal && (
