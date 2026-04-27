@@ -1025,7 +1025,6 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
     const result: QuizResult = {
       id: Math.random().toString(36).substring(2, 11),
       date: new Date().toISOString(),
-      major: activeCourse,
       course: activeCourse,
       total: questions.length,
       score,
@@ -1335,10 +1334,12 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
     );
 
     const unsub = onSnapshot(q, (snap) => {
-      const userResults = snap.docs.map(d => d.data() as QuizResult);
+      const userResults = snap.docs
+        .map(d => d.data() as QuizResult)
+        .filter(r => (r.course || 'Matemática') === activeCourse);
       
       const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
-        return r.missedQuestionIds.map(mqId => {
+        return (r.missedQuestionIds || []).map(mqId => {
           const q = questions.find((q: any) => q.id === mqId);
           const ansInfo = r.answers?.find(a => a.questionId === mqId);
           return q ? { 
@@ -1355,7 +1356,18 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
     });
 
     return () => unsub();
-  }, [selectedStudent, allUsers, questions]);
+  }, [selectedStudent, allUsers, questions, activeCourse]);
+
+  // 3. User Statistics Map (Filtered by activeCourse via results prop)
+  const userStatsMap = results.reduce((acc: any, r: QuizResult) => {
+    if (!acc[r.userEmail]) {
+      acc[r.userEmail] = { count: 0, totalQuestions: 0, totalCorrect: 0 };
+    }
+    acc[r.userEmail].count += 1;
+    acc[r.userEmail].totalQuestions += r.total;
+    acc[r.userEmail].totalCorrect += r.score;
+    return acc;
+  }, {});
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
@@ -1497,10 +1509,10 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                         <td className="px-8 py-6 text-sm text-slate-400 font-medium">{u.email}</td>
                         <td className="px-8 py-6">
                            <div className="flex flex-col">
-                             <span className="text-sm font-black text-slate-700">{u.totalSimulated || 0}</span>
-                             {u.totalQuestions ? (
+                             <span className="text-sm font-black text-slate-700">{userStatsMap[u.email]?.count || 0}</span>
+                             {userStatsMap[u.email]?.totalQuestions ? (
                                <span className={`text-[10px] font-bold ${theme.classes.text}`}>
-                                 {((u.totalCorrect || 0) / u.totalQuestions * 100).toFixed(0)}% de acerto
+                                 {((userStatsMap[u.email]?.totalCorrect || 0) / userStatsMap[u.email]?.totalQuestions * 100).toFixed(0)}% de acerto
                                </span>
                              ) : (
                                <span className="text-[10px] font-bold text-slate-300 italic">Sem dados</span>
@@ -1602,6 +1614,38 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questões Erradas</p>
                   <p className="text-2xl font-black text-rose-500">{studentDetailedProfile.missedWithAnswers.length}</p>
                 </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+                  <h4 className="font-black text-slate-800 uppercase text-xs tracking-widest flex items-center gap-2 mb-4">
+                    <TrendingUp className={`w-4 h-4 ${theme.classes.text}`} /> Desempenho Recente
+                  </h4>
+                  <div className="space-y-3">
+                    {studentDetailedProfile.results?.slice(0, 5).map((r: any) => (
+                      <div key={r.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-sm">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                            {new Date(r.date).toLocaleDateString('pt-BR')}
+                          </span>
+                          <span className="text-sm font-bold text-slate-700">Simulado #{r.id.slice(-4)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           <div className="text-right">
+                              <span className={`text-lg font-black ${theme.classes.text}`}>{r.score}/{r.total}</span>
+                           </div>
+                           <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full ${theme.classes.bg}`} 
+                                style={{ width: `${(r.score / r.total) * 100}%` }}
+                              ></div>
+                           </div>
+                        </div>
+                      </div>
+                    ))}
+                    {(!studentDetailedProfile.results || studentDetailedProfile.results.length === 0) && (
+                      <p className="text-center py-4 text-slate-400 italic text-sm">Nenhum simulado realizado neste curso.</p>
+                    )}
+                  </div>
               </div>
 
               <div className="space-y-4">
