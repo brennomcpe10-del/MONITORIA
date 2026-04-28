@@ -1309,6 +1309,11 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   const [ans, setAns] = useState<(number | null)[]>([]);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [idx]);
 
   useEffect(() => {
     // Scroll to top on mount
@@ -1429,6 +1434,16 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
                   : <span className="flex items-center gap-1 text-rose-600 font-bold text-sm"><XCircle className="w-4 h-4" /> Errou feio</span>
                 }
               </div>
+              {(q.imageUrl || (q as any).imagemUrl) && (
+                <div className="mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50 max-w-full">
+                  <img 
+                    src={q.imageUrl || (q as any).imagemUrl} 
+                    alt="Contexto da questão" 
+                    className="max-w-full h-auto rounded-[8px]" 
+                    onError={(e) => (e.currentTarget.parentElement!.style.display = 'none')}
+                  />
+                </div>
+              )}
               <p className="text-xl font-bold text-slate-800 leading-relaxed mb-8">{q.text}</p>
               <div className="grid gap-2 mb-8">
                 {q.options.map((o, oi) => (
@@ -1480,9 +1495,14 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
              </span>
            )}
          </div>
-         {q.imageUrl && (
-           <div className="mb-8 rounded-3xl overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
-             <img src={q.imageUrl} alt="Contexto da questão" className="max-h-[300px] object-contain" />
+         {(q.imageUrl || (q as any).imagemUrl) && !imageError && (
+           <div className="mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
+             <img 
+               src={q.imageUrl || (q as any).imagemUrl} 
+               alt="Contexto da questão" 
+               className="max-w-full h-auto rounded-[8px]" 
+               onError={() => setImageError(true)}
+             />
            </div>
          )}
          <h2 className="text-2xl md:text-3xl font-bold text-slate-800 leading-tight mb-12">{q.text}</h2>
@@ -2110,6 +2130,16 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                                       <div className="flex items-center justify-between">
                                         <Badge color="rose">Erro em {new Date(m.date).toLocaleDateString('pt-BR')}</Badge>
                                       </div>
+                                      {(m.imageUrl || m.imagemUrl) && (
+                                        <div className="mt-2 mb-3 rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
+                                          <img 
+                                            src={m.imageUrl || m.imagemUrl} 
+                                            alt="Contexto" 
+                                            className="max-w-full h-auto rounded-[8px]"
+                                            onError={(e) => (e.currentTarget.parentElement!.style.display = 'none')}
+                                          />
+                                        </div>
+                                      )}
                                       <p className="text-sm font-bold text-slate-700 leading-relaxed">{m.text}</p>
                                       <div className="flex flex-col sm:flex-row gap-2">
                                         <div className="flex-1 p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-tight flex items-center gap-2">
