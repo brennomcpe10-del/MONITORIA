@@ -33,7 +33,8 @@ import {
   Timer,
   Youtube,
   ExternalLink,
-  Menu
+  Menu,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -53,7 +54,8 @@ import {
   getDoc,
   orderBy,
   increment,
-  writeBatch
+  writeBatch,
+  updateDoc
 } from 'firebase/firestore';
 
 // --- Firebase Config ---
@@ -579,7 +581,7 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {(profile.role === 'monitor' || profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com') && (
+            {(profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com') && (
               <button 
                 onClick={() => { setCurrentView('monitor'); setShowMenu(false); }}
                 className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
@@ -592,7 +594,9 @@ export default function App() {
           <div className="flex items-center gap-4">
             <div className="hidden sm:block text-right pr-4 border-r border-slate-100">
               <p className="text-sm font-black text-slate-800">{profile.name}</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{profile.role}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {profile.email === 'brennomcpe10@gmail.com' ? 'Administrador' : (profile.permissions?.[activeCourse] || 'estudante')}
+              </p>
             </div>
             <button onClick={handleLogout} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200">
               <LogOut className="w-5 h-5" />
@@ -679,6 +683,7 @@ export default function App() {
                 allUsers={allUsers} 
                 activeCourse={activeCourse}
                 isAdmin={profile.email === 'brennomcpe10@gmail.com'}
+                profile={profile}
               />
             )}
             {currentView === 'videos' && (
@@ -799,7 +804,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
   if (!profile) return null;
 
   const theme = COURSE_THEMES[activeCourse];
-  const isMonitor = profile.role === 'monitor' || profile.permissions?.[activeCourse] === 'monitor';
+  const isMonitor = profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com';
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
   const latestResult = results && results.length > 0 ? {
@@ -1196,7 +1201,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   );
 }
 
-function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean }) {
+function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin, profile }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean, profile: UserProfile }) {
   const theme = COURSE_THEMES[activeCourse];
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
   const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
@@ -1210,6 +1215,28 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [bulkDeleteCode, setBulkDeleteCode] = useState('');
+  const [userToApprove, setUserToApprove] = useState<any>(null);
+
+  const handleCourseApproval = async (course: Course) => {
+    if (!userToApprove) return;
+    try {
+      const userRef = doc(db, 'users', userToApprove.email);
+      // Construct the update object for permissions
+      const currentPermissions = userToApprove.permissions || {};
+      
+      await updateDoc(userRef, { 
+        approved: true, 
+        role: 'monitor',
+        [`permissions.${course}`]: 'monitor'
+      });
+      
+      toast.success(`${userToApprove.name} agora é monitor de ${course}!`);
+      setUserToApprove(null);
+    } catch (e: any) {
+      console.error(e);
+      alert('Erro ao aprovar monitor: ' + e.message);
+    }
+  };
 
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
 
@@ -1468,11 +1495,14 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
-           {(['stats', 'list', 'add', 'users'] as const).map(t => (
+           {(isAdmin || profile.permissions?.[activeCourse] === 'monitor') && (['stats', 'list', 'add', 'users'] as const).map(t => (
              <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
                {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : 'Usuários'}
              </button>
            ))}
+           {!(isAdmin || profile.permissions?.[activeCourse] === 'monitor') && (
+             <p className="px-4 py-2.5 text-[10px] font-black text-rose-500 uppercase tracking-widest leading-none">Acesso restrito para monitores deste curso</p>
+           )}
         </div>
       </div>
 
@@ -1558,7 +1588,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                                 </button>
                                  {isAdmin && (
                                   <button 
-                                    onClick={() => handleApprove(u.email, 'monitor')}
+                                    onClick={() => setUserToApprove(u)}
                                     className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase transition-all ${theme.classes.lightBg} ${theme.classes.text} hover:opacity-80`}
                                   >
                                     Aprovar Monitor
@@ -2183,6 +2213,48 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                   Confirmar Exclusão
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Aprovação de Monitor por Curso */}
+      <AnimatePresence>
+        {userToApprove && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                 <ShieldCheck className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-black text-slate-800 mb-2">Aprovar Monitor</h3>
+              <p className="text-slate-500 text-sm font-medium mb-8">
+                Escolha o curso para o qual <strong>{userToApprove.name}</strong> terá permissão de monitoria:
+              </p>
+              
+              <div className="space-y-3">
+                {(['Matemática', 'Biologia', 'Português'] as Course[]).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => handleCourseApproval(c)}
+                    className="w-full py-4 px-6 bg-slate-50 hover:bg-indigo-600 hover:text-white rounded-2xl font-black text-sm transition-all border border-slate-100 flex items-center justify-between group"
+                  >
+                    <span>{c}</span>
+                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all" />
+                  </button>
+                ))}
+              </div>
+              
+              <button 
+                onClick={() => setUserToApprove(null)}
+                className="mt-6 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors"
+              >
+                Cancelar
+              </button>
             </motion.div>
           </div>
         )}
