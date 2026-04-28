@@ -202,6 +202,38 @@ interface QuizResult {
   userName?: string;
 }
 
+// --- Helpers ---
+
+const normalizeCourseKey = (course: string): string => {
+  const map: Record<string, string> = {
+    'Matemática': 'matematica',
+    'Biologia': 'biologia',
+    'Língua Portuguesa': 'portugues'
+  };
+  return map[course] || course.toLowerCase();
+};
+
+const verificarSeEhMonitor = (profile: UserProfile | null, activeCourse: Course): boolean => {
+  if (!profile) return false;
+  
+  const isAdmin = profile.email === 'brennomcpe10@gmail.com';
+  if (isAdmin) return true;
+  
+  const normalizedCourse = normalizeCourseKey(activeCourse);
+  const permissions = profile.permissions || {};
+  
+  // Acesso estritamente vinculado ao curso ativo no objeto de permissões
+  const isCourseMonitor = permissions[normalizedCourse] === 'monitor';
+  
+  if (!isCourseMonitor) {
+    console.log(`Acesso negado para ${activeCourse} (key: ${normalizedCourse}) pois permissão é:`, permissions[normalizedCourse] || 'estudante');
+  } else {
+    console.log(`Acesso concedido para ${activeCourse} (key: ${normalizedCourse})`);
+  }
+  
+  return isCourseMonitor;
+};
+
 // --- Initial Mock Data ---
 const INITIAL_QUESTIONS: Question[] = [
   { id: '1', course: 'Matemática', topic: 'Funções de 1º Grau', text: 'Qual é o valor do coeficiente angular da reta que passa pelos pontos A(1, 2) e B(3, 8)?', options: ['2', '3', '4', '6'], correctIndex: 1, explanation: 'O coeficiente angular (m) é dado por (y2 - y1) / (x2 - x1). Logo, (8 - 2) / (3 - 1) = 6 / 2 = 3.' },
@@ -251,6 +283,19 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
   const [activeCourse, setActiveCourse] = useState<Course>('Matemática');
   const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor' | 'videos'>('dashboard');
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+
+  // Segurança: Bloqueio de Acesso indevido à Monitoria
+  useEffect(() => {
+    if (profile && currentView === 'monitor') {
+      const temAcesso = verificarSeEhMonitor(profile, activeCourse);
+      if (!temAcesso) {
+        console.warn(`[SECURITY] Redirecionando usuário ${profile.email} - Sem permissão para monitoria em ${activeCourse}`);
+        setCurrentView('dashboard');
+        toast.error('Acesso Negado: Você não é monitor de ' + activeCourse);
+      }
+    }
+  }, [currentView, activeCourse, profile]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [videos, setVideos] = useState<VideoClass[]>([]);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
@@ -338,14 +383,14 @@ export default function App() {
 
   // 3. Sync All Users (for Monitor View)
   useEffect(() => {
-    if (profile?.role === 'monitor' || profile?.permissions?.[activeCourse] === 'monitor' || profile?.email === 'brennomcpe10@gmail.com') {
+    if (verificarSeEhMonitor(profile, activeCourse)) {
       const unsub = onSnapshot(collection(db, 'users'), (snap) => {
         const uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
         setAllUsers(uData);
       });
       return () => unsub();
     }
-  }, [profile?.role, profile?.permissions, activeCourse]);
+  }, [profile, activeCourse]);
 
   // 4. Sync Personal Results (filtered by course)
   useEffect(() => {
@@ -375,7 +420,7 @@ export default function App() {
 
   // 5. Sync All Results (System Dashboard for Monitors)
   useEffect(() => {
-    if (profile?.role === 'monitor' || profile?.permissions?.[activeCourse] === 'monitor' || profile?.email === 'brennomcpe10@gmail.com') {
+    if (verificarSeEhMonitor(profile, activeCourse)) {
       const q = query(collection(db, 'results'), orderBy('date', 'desc'));
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs
@@ -389,7 +434,7 @@ export default function App() {
     } else {
       setSystemResults([]);
     }
-  }, [profile?.role, profile?.permissions, activeCourse]);
+  }, [profile, activeCourse]);
 
   // Logout
   const handleLogout = () => {
@@ -508,17 +553,26 @@ export default function App() {
   const targetTheme = targetCourse ? COURSE_THEMES[targetCourse] : theme;
 
   return (
-    <div className={`min-h-screen bg-slate-50 font-sans selection:bg-${theme.primary}-100`}>
-      {/* Navbar */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100 px-6 h-20 flex items-center">
+    <div className={`min-h-screen bg-slate-50 font-sans selection:bg-${theme.primary}-100 pt-20`}>
+      {/* Navbar Fixed */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-100 px-4 sm:px-6 h-20 flex items-center">
         <div className="max-w-7xl mx-auto w-full flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentView('dashboard')}>
-            <div className={`w-12 h-12 ${theme.classes.bg} rounded-2xl flex items-center justify-center text-white shadow-lg ${theme.classes.shadow}`}>
-              <theme.icon className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-black tracking-tighter">Monitoria <span className={theme.classes.text}>3º C</span></h2>
-              <p className={`text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>{theme.title}</p>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setShowMobileSidebar(true)}
+              className="md:hidden w-10 h-10 flex items-center justify-center bg-slate-100 rounded-xl text-slate-500 active:scale-95 transition-all"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => setCurrentView('dashboard')}>
+              <div className={`w-10 h-10 sm:w-12 sm:h-12 ${theme.classes.bg} rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg ${theme.classes.shadow}`}>
+                <theme.icon className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div className="hidden xs:block">
+                <h2 className="text-sm sm:text-xl font-black tracking-tighter leading-none mb-1">Monitoria <span className={theme.classes.text}>3º C</span></h2>
+                <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>{theme.title}</p>
+              </div>
             </div>
           </div>
 
@@ -535,33 +589,35 @@ export default function App() {
                 onClick={() => setShowMenu(!showMenu)}
                 className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${showMenu || currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
               >
-                <Menu className="w-4 h-4" /> Menu
+                <BookOpen className="w-4 h-4" /> Menu
               </button>
               
               <AnimatePresence>
                 {showMenu && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)}></div>
+                    <div className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-none" onClick={() => setShowMenu(false)}></div>
                     <motion.div 
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-64 bg-white rounded-3xl shadow-2xl border border-slate-100 p-2 z-50 overflow-hidden"
+                      className="fixed inset-x-4 top-24 sm:absolute sm:inset-auto sm:right-0 sm:top-full mt-2 sm:w-64 bg-white rounded-[2rem] sm:rounded-3xl shadow-2xl border border-slate-100 p-2 z-50 overflow-hidden"
                     >
-                       <button 
-                         onClick={() => { setCurrentView('videos'); setShowMenu(false); }}
-                         className={`flex items-center gap-3 w-full p-4 rounded-2xl ${theme.classes.hoverBg} text-slate-600 hover:${theme.classes.text} transition-all text-left`}
-                       >
-                         <div className={`w-10 h-10 ${theme.classes.lightBg} rounded-xl flex items-center justify-center ${theme.classes.text}`}>
-                           <Youtube className="w-5 h-5" />
-                         </div>
-                         <div>
-                           <p className="font-black text-sm">Videoaulas</p>
-                           <p className="text-[10px] font-medium text-slate-400 leading-none">Aulas gravadas</p>
-                         </div>
-                       </button>
-
-                       <div className="mx-4 my-2 h-px bg-slate-50"></div>
+                       <div className="hidden sm:block">
+                         <button 
+                           onClick={() => { setCurrentView('videos'); setShowMenu(false); }}
+                           className={`flex items-center gap-3 w-full p-4 rounded-2xl ${theme.classes.hoverBg} text-slate-600 hover:${theme.classes.text} transition-all text-left`}
+                         >
+                           <div className={`w-10 h-10 ${theme.classes.lightBg} rounded-xl flex items-center justify-center ${theme.classes.text}`}>
+                             <Youtube className="w-5 h-5" />
+                           </div>
+                           <div>
+                             <p className="font-black text-sm">Videoaulas</p>
+                             <p className="text-[10px] font-medium text-slate-400 leading-none">Aulas gravadas</p>
+                           </div>
+                         </button>
+                         <div className="mx-4 my-2 h-px bg-slate-50"></div>
+                       </div>
+                       
                        <p className="px-4 py-2 text-[10px] font-black text-slate-300 uppercase tracking-widest">Trocar de Curso</p>
                        {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map(c => (
                          <button 
@@ -575,35 +631,128 @@ export default function App() {
                            <p className="font-black text-sm">{c}</p>
                          </button>
                        ))}
+
+                       <div className="sm:hidden mt-2 pt-2 border-t border-slate-50">
+                         <button 
+                           onClick={() => setShowMenu(false)}
+                           className="w-full py-4 text-xs font-black text-slate-400 uppercase tracking-widest"
+                         >
+                           Fechar
+                         </button>
+                       </div>
                     </motion.div>
                   </>
                 )}
               </AnimatePresence>
             </div>
 
-            {(profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com') && (
+            {verificarSeEhMonitor(profile, activeCourse) && (
               <button 
                 onClick={() => { setCurrentView('monitor'); setShowMenu(false); }}
                 className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
               >
-                <Users className="w-4 h-4" /> Monitoria
+                <ShieldCheck className="w-4 h-4" /> Monitoria
               </button>
             )}
           </nav>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <div className="hidden sm:block text-right pr-4 border-r border-slate-100">
-              <p className="text-sm font-black text-slate-800">{profile.name}</p>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                {profile.email === 'brennomcpe10@gmail.com' ? 'Administrador' : (profile.permissions?.[activeCourse] || 'estudante')}
+              <p className="text-sm font-black text-slate-800 leading-none">{profile.name.split(' ')[0]}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">
+                {profile.email === 'brennomcpe10@gmail.com' ? 'Admin' : (profile.permissions?.[normalizeCourseKey(activeCourse)] === 'monitor' ? 'Monitor' : 'Aluno')}
               </p>
             </div>
-            <button onClick={handleLogout} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200">
+            <button onClick={handleLogout} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200 active:scale-95">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
         </div>
       </header>
+
+      {/* Mobile Drawer (Sidebar) */}
+      <AnimatePresence>
+        {showMobileSidebar && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMobileSidebar(false)}
+              className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-sm md:hidden"
+            />
+            <motion.div 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 bottom-0 left-0 w-[280px] z-[101] bg-white shadow-2xl p-6 md:hidden flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 ${theme.classes.bg} rounded-xl flex items-center justify-center text-white shadow-lg`}>
+                    <theme.icon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="font-black text-slate-800 leading-none">Monitoria</h2>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{activeCourse}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowMobileSidebar(false)} className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2 flex-grow">
+                <button 
+                  onClick={() => { setCurrentView('dashboard'); setShowMobileSidebar(false); }}
+                  className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'dashboard' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <LayoutDashboard className="w-6 h-6" /> Início
+                </button>
+                <button 
+                  onClick={() => { setShowMenu(true); setShowMobileSidebar(false); }}
+                  className="w-full p-4 rounded-2xl flex items-center gap-4 font-black text-slate-500 hover:bg-slate-50 transition-all"
+                >
+                  <BookOpen className="w-6 h-6" /> Menu de Cursos
+                </button>
+                <button 
+                  onClick={() => { setCurrentView('videos'); setShowMobileSidebar(false); }}
+                  className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <Youtube className="w-6 h-6" /> Videoaulas
+                </button>
+                {verificarSeEhMonitor(profile, activeCourse) && (
+                  <button 
+                    onClick={() => { setCurrentView('monitor'); setShowMobileSidebar(false); }}
+                    className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg` : 'text-indigo-600 bg-indigo-50 shadow-sm border border-indigo-100'}`}
+                  >
+                    <ShieldCheck className="w-6 h-6" /> Ver Monitoria
+                  </button>
+                )}
+              </div>
+
+              <div className="pt-6 border-t border-slate-100 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-2xl ${theme.classes.lightBg} flex items-center justify-center ${theme.classes.text} font-black text-xl`}>
+                    {profile.name.charAt(0)}
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className="font-black text-slate-800 truncate">{profile.name}</p>
+                    <p className="text-xs text-slate-400 font-medium truncate">{profile.email}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="w-full h-14 bg-rose-50 text-rose-600 rounded-2xl font-black flex items-center justify-center gap-3 transition-all active:scale-95"
+                >
+                  <LogOut className="w-5 h-5" /> Sair da Conta
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
         <AnimatePresence mode="wait">
@@ -804,7 +953,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
   if (!profile) return null;
 
   const theme = COURSE_THEMES[activeCourse];
-  const isMonitor = profile.permissions?.[activeCourse] === 'monitor' || profile.email === 'brennomcpe10@gmail.com';
+  const isMonitor = verificarSeEhMonitor(profile, activeCourse);
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
   const latestResult = results && results.length > 0 ? {
@@ -1227,7 +1376,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       await updateDoc(userRef, { 
         approved: true, 
         role: 'monitor',
-        [`permissions.${course}`]: 'monitor'
+        [`permissions.${normalizeCourseKey(course)}`]: 'monitor'
       });
       
       toast.success(`${userToApprove.name} agora é monitor de ${course}!`);
@@ -1495,12 +1644,12 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
-           {(isAdmin || profile.permissions?.[activeCourse] === 'monitor') && (['stats', 'list', 'add', 'users'] as const).map(t => (
-             <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
+           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users'] as const).map(t => (
+             <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-3.5 rounded-xl text-[10px] sm:text-xs font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
                {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : 'Usuários'}
              </button>
            ))}
-           {!(isAdmin || profile.permissions?.[activeCourse] === 'monitor') && (
+           {!verificarSeEhMonitor(profile, activeCourse) && (
              <p className="px-4 py-2.5 text-[10px] font-black text-rose-500 uppercase tracking-widest leading-none">Acesso restrito para monitores deste curso</p>
            )}
         </div>
