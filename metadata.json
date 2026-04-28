@@ -1,6 +1,6 @@
 {
-  "name": "Monitoria Matemática 3º Ano C",
-  "description": "Plataforma de simulados de matemática para alunos do 3º ano, com acompanhamento de desempenho por conteúdo e painel para monitores.",
+  "name": "Monitoria Multi-Módulos 3º Ano C",
+  "description": "Plataforma completa de simulados e videoaulas de Matemática, Biologia e Português, com análise de desempenho individual e painel de monitoria em tempo real.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

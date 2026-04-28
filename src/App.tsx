@@ -35,7 +35,8 @@ import {
   ExternalLink,
   Menu,
   ShieldCheck,
-  ChevronDown
+  ChevronDown,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -132,8 +133,22 @@ const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, t
 };
 
 // --- Types & Interfaces ---
-type Role = 'student' | 'monitor';
+type Role = 'estudante' | 'monitor';
 type Course = 'Matemática' | 'Biologia' | 'Língua Portuguesa';
+
+interface CourseProgress {
+  lastMissedQuestionIds: string[];
+  missedTopics: string[];
+  totalSimulated: number;
+  totalCorrect: number;
+  totalQuestions: number;
+  latestResult?: {
+    score: number;
+    total: number;
+    date: string;
+    topicsCount: number;
+  };
+}
 
 interface UserProfile {
   name: string;
@@ -141,6 +156,10 @@ interface UserProfile {
   role: Role;
   approved: boolean;
   permissions?: Record<string, 'monitor' | 'estudante'>;
+  // Progress (Per Course)
+  courses?: Record<string, CourseProgress>;
+  
+  // Legacy fields (will keep for compatibility)
   lastMissedQuestionIds: string[];
   missedTopics?: string[];
   totalSimulated?: number;
@@ -287,6 +306,8 @@ export default function App() {
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showMobileCourses, setShowMobileCourses] = useState(false);
 
+  const [hasSelectedInitialCourse, setHasSelectedInitialCourse] = useState(false);
+
   // Segurança: Bloqueio de Acesso indevido à Monitoria
   useEffect(() => {
     if (profile && currentView === 'monitor') {
@@ -418,7 +439,7 @@ export default function App() {
     } else {
       setUserResults([]);
     }
-  }, [profile?.email]);
+  }, [profile?.email, activeCourse]);
 
   // 5. Sync All Results (System Dashboard for Monitors)
   useEffect(() => {
@@ -463,7 +484,7 @@ export default function App() {
         const newProfile: UserProfile = {
           name: name,
           email: email,
-          role: isAdmin ? 'monitor' : 'student',
+          role: isAdmin ? 'monitor' : 'estudante',
           approved: isAdmin ? true : false,
           lastMissedQuestionIds: []
         };
@@ -495,7 +516,7 @@ export default function App() {
                 <Calculator className="w-8 h-8" />
               </div>
               <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-2">Monitoria 3º Ano C</h1>
-              <p className="text-slate-400 font-medium">Plataforma de simulados matemáticos</p>
+              <p className="text-slate-400 font-medium">Sua jornada rumo ao conhecimento em todas as áreas.</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
@@ -521,7 +542,7 @@ export default function App() {
               </button>
             </form>
             <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Apenas Alunos Autorizados</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Apenas Estudantes Autorizados</p>
             </div>
           </div>
         </motion.div>
@@ -548,6 +569,87 @@ export default function App() {
         </motion.div>
         <Toaster richColors position="top-center" />
       </div>
+    );
+  }
+
+  // 2. Course Selection Screen (Netflix Style)
+  if (!hasSelectedInitialCourse) {
+    return (
+      <motion.div 
+        key="course-selector"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[900] bg-slate-50 flex flex-col items-center justify-center p-6 sm:p-12 overflow-y-auto"
+      >
+        <div className="max-w-6xl w-full text-center">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <h1 className="text-3xl sm:text-5xl font-black text-slate-900 tracking-tight italic mb-4">
+              O que vamos aprender hoje, <span className="text-indigo-600">{profile.name.split(' ')[0]}</span>?
+            </h1>
+            <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px] sm:text-xs mb-12 sm:mb-20">Selecione um módulo para iniciar</p>
+          </motion.div>
+          
+          <motion.div 
+            initial="hidden"
+            animate="visible"
+            variants={{
+              visible: {
+                transition: {
+                  staggerChildren: 0.1
+                }
+              }
+            }}
+            className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10"
+          >
+            {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map((c) => {
+              const theme = COURSE_THEMES[c];
+              return (
+                <motion.button 
+                  key={c}
+                  variants={{
+                    hidden: { opacity: 0, y: 30 },
+                    visible: { opacity: 1, y: 0 }
+                  }}
+                  whileHover={{ scale: 1.05, y: -8 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setActiveCourse(c);
+                    setHasSelectedInitialCourse(true);
+                  }}
+                  className="group relative overflow-hidden"
+                >
+                  <div className={`aspect-[4/5] sm:aspect-[3/4] rounded-[3rem] ${theme.classes.bg} p-10 flex flex-col items-center justify-center text-white shadow-2xl ${theme.classes.shadow} transition-all duration-300`}>
+                    <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 blur-[60px] rounded-full"></div>
+                    
+                    <div className="relative mb-8 transform transition-all duration-300 group-hover:scale-110">
+                       <theme.icon className="w-16 h-16 sm:w-24 sm:h-24 stroke-[1.5]" />
+                    </div>
+                    
+                    <h2 className="relative text-2xl sm:text-3xl font-black italic uppercase tracking-tighter mb-2">{c}</h2>
+                    <p className="relative text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Entrar no Módulo</p>
+                  </div>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+          
+          <motion.button 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.8 }}
+            onClick={handleLogout}
+            className="mt-16 sm:mt-24 text-slate-300 hover:text-rose-500 font-black uppercase text-[10px] tracking-[0.4em] transition-all flex items-center gap-2 mx-auto"
+          >
+            <LogOut className="w-4 h-4" /> Sair da Conta
+          </motion.button>
+        </div>
+      </motion.div>
     );
   }
 
@@ -654,7 +756,7 @@ export default function App() {
             <div className="hidden sm:block text-right pr-4 border-r border-slate-100">
               <p className="text-sm font-black text-slate-800 leading-none">{profile.name.split(' ')[0]}</p>
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">
-                {profile.email === 'brennomcpe10@gmail.com' ? 'Admin' : (profile.permissions?.[normalizeCourseKey(activeCourse)] === 'monitor' ? 'Monitor' : 'Aluno')}
+                {profile.email === 'brennomcpe10@gmail.com' ? 'Admin' : (profile.permissions?.[normalizeCourseKey(activeCourse)] === 'monitor' ? 'Monitor' : 'Estudante')}
               </p>
             </div>
             
@@ -834,19 +936,24 @@ export default function App() {
                         return q ? q.topic : null;
                       }).filter(Boolean) as string[];
 
-                      await setDoc(doc(db, 'users', profile.email), { 
-                        lastMissedQuestionIds: res.missedQuestionIds,
-                        missedTopics: [...(profile.missedTopics || []), ...missedTopicsFromThisQuiz],
-                        totalSimulated: increment(1),
-                        totalCorrect: increment(res.score),
-                        totalQuestions: increment(res.total),
-                        latestResult: {
+                      const courseKey = normalizeCourseKey(activeCourse);
+                      const currentCourseProgress = profile.courses?.[courseKey];
+                      const newMissedTopics = [...(currentCourseProgress?.missedTopics || []), ...missedTopicsFromThisQuiz];
+
+                      const userRef = doc(db, 'users', profile.email);
+                      await updateDoc(userRef, {
+                        [`courses.${courseKey}.lastMissedQuestionIds`]: res.missedQuestionIds,
+                        [`courses.${courseKey}.missedTopics`]: newMissedTopics,
+                        [`courses.${courseKey}.totalSimulated`]: increment(1),
+                        [`courses.${courseKey}.totalCorrect`]: increment(res.score),
+                        [`courses.${courseKey}.totalQuestions`]: increment(res.total),
+                        [`courses.${courseKey}.latestResult`]: {
                           score: res.score,
                           total: res.total,
                           date: res.date,
                           topicsCount: Object.keys(res.topicStats).length
                         }
-                      }, { merge: true });
+                      });
                     } catch (e) {
                       console.error(e);
                       toast.error('Erro ao salvar resultado no banco.');
@@ -871,7 +978,7 @@ export default function App() {
               />
             )}
             {currentView === 'videos' && (
-              <VideosView videos={videos} activeCourse={activeCourse} />
+              <VideosView videos={videos} activeCourse={activeCourse} profile={profile} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -909,13 +1016,28 @@ export default function App() {
 
 // --- Views ---
 
-function VideosView({ videos, activeCourse }: { videos: VideoClass[], activeCourse: Course }) {
+function VideosView({ videos, activeCourse, profile }: { videos: VideoClass[], activeCourse: Course, profile: UserProfile | null }) {
   const theme = COURSE_THEMES[activeCourse];
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
+
   const getYTId = (url: string) => {
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
     return (match && match[2].length === 11) ? match[2] : null;
   };
+
+  const handleDeleteVideo = async (id: string) => {
+    if (confirm('Deseja excluir esta videoaula permanentemente?')) {
+      try {
+        await deleteDoc(doc(db, 'videos', id));
+        toast.success('Videoaula removida com sucesso!');
+      } catch (e) {
+        toast.error('Erro ao excluir videoaula.');
+      }
+    }
+  };
+
+  const isMonitor = verificarSeEhMonitor(profile, activeCourse);
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
@@ -924,50 +1046,78 @@ function VideosView({ videos, activeCourse }: { videos: VideoClass[], activeCour
         <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">{activeCourse} • Reforce seu aprendizado</p>
       </div>
 
+      {playingVideoId && (
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="fixed inset-0 z-[200] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-10"
+        >
+          <div className="relative w-full max-w-5xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl">
+            <button 
+              onClick={() => setPlayingVideoId(null)}
+              className="absolute top-4 right-4 z-10 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-all"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </button>
+            <iframe 
+              src={`https://www.youtube.com/embed/${playingVideoId}?autoplay=1`}
+              title="YouTube video player"
+              className="w-full h-full border-none"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            ></iframe>
+          </div>
+        </motion.div>
+      )}
+
       {videos.length > 0 ? (
         <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           {videos.map((v) => {
             const ytId = getYTId(v.youtubeUrl);
             const thumb = ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : null;
             return (
-              <div key={v.id}>
+              <div key={v.id} className="relative group">
                 <Card className={`group hover:shadow-2xl hover:${theme.classes.shadow} transition-all border-none`}>
                    <div className="relative aspect-video overflow-hidden">
-                   {thumb ? (
-                     <img src={thumb} alt={v.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                   ) : (
-                     <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
-                       <Youtube className="w-12 h-12" />
-                     </div>
-                   )}
-                   <a 
-                     href={v.youtubeUrl} 
-                     target="_blank" 
-                     rel="noreferrer"
-                     className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm"
-                   >
-                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-rose-600 shadow-2xl scale-75 group-hover:scale-100 transition-transform duration-300">
-                       <Play className="w-8 h-8 fill-rose-600" />
-                     </div>
-                   </a>
-                   <div className="absolute top-4 left-4">
-                     <Badge color="rose">Aula</Badge>
-                   </div>
-                 </div>
-                 <div className="p-6 space-y-2">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(v.date).toLocaleDateString('pt-BR')}</p>
-                   <h3 className="text-lg font-black text-slate-800 leading-tight group-hover:text-indigo-600 transition-colors">{v.title}</h3>
-                   <a 
-                     href={v.youtubeUrl} 
-                     target="_blank" 
-                     rel="noreferrer"
-                     className="text-indigo-600 text-xs font-bold flex items-center gap-1 hover:underline"
-                   >
-                     Assistir no Youtube <ExternalLink className="w-3 h-3" />
-                   </a>
-                 </div>
-              </Card>
-            </div>
+                    {thumb ? (
+                      <img src={thumb} alt={v.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                    ) : (
+                      <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                        <Youtube className="w-12 h-12" />
+                      </div>
+                    )}
+                    <button 
+                      onClick={() => ytId && setPlayingVideoId(ytId)}
+                      className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm cursor-pointer"
+                    >
+                      <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-rose-600 shadow-2xl scale-75 group-hover:scale-100 transition-transform duration-300">
+                        <Play className="w-8 h-8 fill-rose-600" />
+                      </div>
+                    </button>
+                    <div className="absolute top-4 left-4">
+                      <Badge color="rose">Aula</Badge>
+                    </div>
+                    {isMonitor && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeleteVideo(v.id); }}
+                        className="absolute top-4 right-4 w-9 h-9 bg-rose-600 text-white rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-rose-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="p-6 space-y-2">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(v.date).toLocaleDateString('pt-BR')}</p>
+                    <h3 className="text-lg font-black text-slate-800 leading-tight group-hover:text-indigo-600 transition-colors">{v.title}</h3>
+                    <button 
+                      onClick={() => ytId && setPlayingVideoId(ytId)}
+                      className="text-indigo-600 text-xs font-bold flex items-center gap-1 hover:underline"
+                    >
+                      Assistir Agora <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </Card>
+              </div>
             );
           })}
         </div>
@@ -991,21 +1141,18 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
   const isMonitor = verificarSeEhMonitor(profile, activeCourse);
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
-  const latestResult = results && results.length > 0 ? {
-    score: results[0].score,
-    total: results[0].total,
-    date: results[0].date,
-    topicsCount: results[0].topicStats ? Object.keys(results[0].topicStats).length : 0
-  } : null;
+  const courseKey = normalizeCourseKey(activeCourse);
+  const courseProgress = profile.courses?.[courseKey];
 
-  const totalQuizzes = results ? results.length : 0;
+  const latestResult = courseProgress?.latestResult || null;
+  const totalQuizzes = courseProgress?.totalSimulated || 0;
   
   let acc = "0";
-  if (results && results.length > 0) {
-    const totalScore = results.reduce((a: any, b: any) => a + (b.score || 0), 0);
-    const totalPossible = results.reduce((a: any, b: any) => a + (b.total || 0), 0);
-    if (totalPossible > 0) acc = ((totalScore / totalPossible) * 100).toFixed(0);
+  if (courseProgress && courseProgress.totalQuestions > 0) {
+    acc = ((courseProgress.totalCorrect / courseProgress.totalQuestions) * 100).toFixed(0);
   }
+
+  const missedTopics = courseProgress?.missedTopics || [];
 
   return (
     <div className="space-y-8">
@@ -1127,9 +1274,9 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
            <h3 className="text-xl font-bold flex items-center gap-2">Pontos Fracos</h3>
            <Card className={`p-8 flex flex-col h-full bg-slate-900 text-white border-none shadow-lg ${theme.classes.shadow}`}>
               <p className="text-slate-400 text-sm mb-8">Assuntos que você precisa reforçar de acordo com seus erros.</p>
-              {profile.missedTopics && profile.missedTopics.length > 0 ? (
+              {missedTopics.length > 0 ? (
                 <div className="space-y-6 flex-1">
-                   {Object.entries(profile.missedTopics.reduce((acc: any, topic: string) => {
+                   {Object.entries(missedTopics.reduce((acc: any, topic: string) => {
                       acc[topic] = (acc[topic] || 0) + 1;
                       return acc;
                     }, {})).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([topic, count]: any) => (
@@ -1302,7 +1449,8 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   }
 
   const q = questions[idx];
-  const isPreviouslyMissed = profile.lastMissedQuestionIds?.includes(q.id);
+  const courseKey = normalizeCourseKey(activeCourse);
+  const isPreviouslyMissed = profile.courses?.[courseKey]?.lastMissedQuestionIds?.includes(q.id);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -1546,9 +1694,9 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
 
     const unsub = onSnapshot(q, (snap) => {
       const userResults = snap.docs
-        .map(d => d.data() as QuizResult)
-        .filter(r => (r.course || 'Matemática') === activeCourse);
+        .map(d => d.data() as QuizResult);
       
+      // Group errors by course to avoid confusion
       const missedWithAnswers = userResults.flatMap((r: QuizResult) => {
         return (r.missedQuestionIds || []).map(mqId => {
           const q = questions.find((q: any) => q.id === mqId);
@@ -1556,7 +1704,8 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           return q ? { 
             ...q, 
             marked: q.options[ansInfo?.selectedIndex || 0],
-            date: r.date 
+            date: r.date,
+            quizCourse: r.course || 'Matemática' 
           } : null;
         }).filter(Boolean);
       });
@@ -1650,9 +1799,26 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
   const handleAddVideo = async (e: FormEvent) => {
     e.preventDefault();
     if (!newVideo.title || !newVideo.youtubeUrl) return toast.error('Preencha os campos da videoaula!');
+    
+    // Extract YouTube ID
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = newVideo.youtubeUrl.match(regExp);
+    const ytId = (match && match[2].length === 11) ? match[2] : null;
+
+    if (!ytId) {
+      return toast.error('URL do YouTube inválida! Use o link completo ou o ID de 11 caracteres.');
+    }
+
     try {
       const id = Math.random().toString(36).substring(2, 11);
-      await setDoc(doc(db, 'videos', id), { ...newVideo, id, date: new Date().toISOString(), course: activeCourse });
+      // We save the extracted ID as the youtubeUrl or stick to full URL but ensure we only use ID for playing
+      await setDoc(doc(db, 'videos', id), { 
+        ...newVideo, 
+        youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`, // Normalize
+        id, 
+        date: new Date().toISOString(), 
+        course: activeCourse 
+      });
       toast.success('Videoaula cadastrada!');
       setNewVideo({ title: '', youtubeUrl: '' });
     } catch (e) {
@@ -1735,7 +1901,9 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                         </td>
                         <td className="px-8 py-6">
                           {u.approved ? (
-                            <Badge color={u.role === 'monitor' ? theme.primary as any : 'emerald'}>{u.role}</Badge>
+                            <Badge color={u.role === 'monitor' ? theme.primary as any : 'emerald'}>
+                              {u.role === 'estudante' ? 'Estudante' : u.role}
+                            </Badge>
                           ) : (
                             <span className="flex items-center gap-1.5 text-amber-500 text-[10px] font-black uppercase tracking-widest">
                               <Loader2 className="w-3 h-3 animate-spin" /> Pendente
@@ -1765,10 +1933,10 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                             {!u.approved && (
                               <>
                                 <button 
-                                  onClick={() => handleApprove(u.email, 'student')}
+                                  onClick={() => handleApprove(u.email, 'estudante')}
                                   className="h-8 px-3 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-100"
                                 >
-                                  Aprovar Aluno
+                                  Aprovar Estudante
                                 </button>
                                  {isAdmin && (
                                   <button 
@@ -1808,7 +1976,23 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                    <p className="text-indigo-100 text-[10px] font-bold uppercase tracking-widest">{studentDetailedProfile.user.email}</p>
                  </div>
                </div>
-               <button onClick={() => setSelectedStudent(null)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all"><XCircle className="w-6 h-6" /></button>
+               <div className="flex items-center gap-3">
+                 {studentDetailedProfile.user.email !== 'brennomcpe10@gmail.com' && (
+                   <button 
+                     onClick={() => {
+                       if (confirm('Deseja realmente EXCLUIR permanentemente este usuário?')) {
+                         handleDecline(studentDetailedProfile.user.email);
+                         setSelectedStudent(null);
+                       }
+                     }}
+                     className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-100 flex items-center justify-center hover:bg-rose-500 transition-all"
+                     title="Excluir Usuário"
+                   >
+                     <Trash2 className="w-5 h-5" />
+                   </button>
+                 )}
+                 <button onClick={() => setSelectedStudent(null)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all"><XCircle className="w-6 h-6" /></button>
+               </div>
             </div>
             <div className="p-8 overflow-y-auto flex-1 space-y-8">
               <div className="grid grid-cols-3 gap-6">
@@ -1817,7 +2001,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                   <p className="text-2xl font-black text-slate-800">{studentDetailedProfile.results.length}</p>
                 </div>
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Média</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Média Geral</p>
                   <p className="text-2xl font-black text-indigo-600">
                     {studentDetailedProfile.results.length > 0 
                       ? (studentDetailedProfile.results.reduce((a:any, b:any) => a + b.score, 0) / studentDetailedProfile.results.reduce((a:any, b:any) => a + b.total, 0) * 100).toFixed(0) 
@@ -1825,39 +2009,51 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                   </p>
                 </div>
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questões Erradas</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Erros Totais</p>
                   <p className="text-2xl font-black text-rose-500">{studentDetailedProfile.missedWithAnswers.length}</p>
                 </div>
               </div>
 
               <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
                   <h4 className="font-black text-slate-800 uppercase text-xs tracking-widest flex items-center gap-2 mb-4">
-                    <TrendingUp className={`w-4 h-4 ${theme.classes.text}`} /> Desempenho Recente
+                    <TrendingUp className={`w-4 h-4 text-indigo-600`} /> Desempenho por Disciplina
                   </h4>
-                  <div className="space-y-3">
-                    {studentDetailedProfile.results?.slice(0, 5).map((r: any) => (
-                      <div key={r.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-sm">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                            {new Date(r.date).toLocaleDateString('pt-BR')}
-                          </span>
-                          <span className="text-sm font-bold text-slate-700">Simulado #{r.id.slice(-4)}</span>
+                  <div className="space-y-6">
+                    {Object.entries((studentDetailedProfile.results || []).reduce((acc: any, r: any) => {
+                      const courseName = r.course || 'Matemática';
+                      if (!acc[courseName]) acc[courseName] = [];
+                      acc[courseName].push(r);
+                      return acc;
+                    }, {})).map(([courseName, courseResults]: any) => {
+                      const cTheme = COURSE_THEMES[courseName as Course] || theme;
+                      return (
+                        <div key={courseName} className="space-y-3">
+                          <div className="flex items-center gap-2 px-2">
+                             <cTheme.icon className={`w-4 h-4 ${cTheme.classes.text}`} />
+                             <span className="text-xs font-black uppercase tracking-widest text-slate-500">{courseName}</span>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {courseResults.slice(0, 4).map((r: any) => (
+                              <div key={r.id} className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                                <div className="flex flex-col">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">
+                                    {new Date(r.date).toLocaleDateString('pt-BR')} • {new Date(r.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  <span className="text-sm font-bold text-slate-700">Simulado de {courseName}</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                   <div className="text-right">
+                                      <span className={`text-lg font-black ${cTheme.classes.text}`}>{r.score}/{r.total}</span>
+                                   </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                           <div className="text-right">
-                              <span className={`text-lg font-black ${theme.classes.text}`}>{r.score}/{r.total}</span>
-                           </div>
-                           <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full ${theme.classes.bg}`} 
-                                style={{ width: `${(r.score / r.total) * 100}%` }}
-                              ></div>
-                           </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {(!studentDetailedProfile.results || studentDetailedProfile.results.length === 0) && (
-                      <p className="text-center py-4 text-slate-400 italic text-sm">Nenhum simulado realizado neste curso.</p>
+                      <p className="text-center py-4 text-slate-400 italic text-sm">Nenhum simulado realizado ainda.</p>
                     )}
                   </div>
               </div>
@@ -1869,24 +2065,28 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                 {studentDetailedProfile.missedWithAnswers.length > 0 ? (
                   <div className="space-y-3">
                     {Object.entries(studentDetailedProfile.missedWithAnswers.reduce((acc: any, m: any) => {
-                      if (!acc[m.topic]) acc[m.topic] = [];
-                      acc[m.topic].push(m);
+                      const key = `${m.quizCourse} • ${m.topic}`;
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(m);
                       return acc;
-                    }, {})).map(([topic, ms]: any) => {
-                      const topicKey = `student_err_${topic}`;
+                    }, {})).map(([topicLabel, ms]: any) => {
+                      const topicKey = `student_err_${topicLabel}`;
                       const isExpanded = expandedTopics[topicKey];
+                      const [courseName] = topicLabel.split(' • ');
+                      const cTheme = COURSE_THEMES[courseName as Course] || theme;
+
                       return (
-                        <div key={topic} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                        <div key={topicLabel} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
                           <button 
                             onClick={() => toggleTopic(topicKey)}
                             className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-all text-left"
                           >
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
-                                <AlertTriangle className="w-4 h-4" />
+                              <div className={`w-8 h-8 ${cTheme.classes.lightBg} rounded-xl flex items-center justify-center ${cTheme.classes.text}`}>
+                                {React.createElement(cTheme.icon, { className: "w-4 h-4" })}
                               </div>
                               <div>
-                                <p className="text-sm font-black text-slate-800 tracking-tight">{topic}</p>
+                                <p className="text-sm font-black text-slate-800 tracking-tight">{topicLabel}</p>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ms.length} {ms.length === 1 ? 'erro registrado' : 'erros registrados'}</p>
                               </div>
                             </div>
