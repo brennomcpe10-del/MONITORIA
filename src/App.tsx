@@ -40,8 +40,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 
-import { auth, db } from './firebase';
+// Firebase Imports
+import { initializeApp } from 'firebase/app';
 import { 
+  getFirestore, 
   collection, 
   doc, 
   onSnapshot, 
@@ -56,12 +58,20 @@ import {
   writeBatch,
   updateDoc
 } from 'firebase/firestore';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged,
-  signOut 
-} from 'firebase/auth';
+
+// --- Firebase Config ---
+const firebaseConfig = {
+  apiKey: 'AIzaSyCpVxucRWHOev_glPdkGPlbReGlDMXWkeM',
+  authDomain: 'monitoria-241b7.firebaseapp.com',
+  projectId: 'monitoria-241b7',
+  storageBucket: 'monitoria-241b7.firebasestorage.app',
+  messagingSenderId: '103385176949',
+  appId: '1:103385176949:web:f217c4adc07d024e7d113c',
+  measurementId: 'G-J0R4QS27C4'
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 // --- Themes ---
 const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, title: string, classes: any }> = {
@@ -269,8 +279,6 @@ export default function App() {
   });
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loginData, setLoginData] = useState({ name: '', email: '' });
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loadingProfile, setLoadingProfile] = useState(true);
 
   // --- App State ---
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
@@ -325,26 +333,21 @@ export default function App() {
   useEffect(() => {
     if (!sessionEmail) {
       setProfile(null);
-      setLoadingProfile(false);
       return;
     }
 
-    setLoadingProfile(true);
     const unsub = onSnapshot(doc(db, 'users', sessionEmail), (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() as UserProfile;
-        setProfile(data);
+        setProfile(docSnap.data() as UserProfile);
       } else {
         // Handle case where user might have been deleted
         setProfile(null);
         setSessionEmail(null);
         localStorage.removeItem('mm_session_email');
       }
-      setLoadingProfile(false);
     }, (error) => {
       console.error('Error fetching profile:', error);
       toast.error('Erro ao sincronizar perfil em tempo real.');
-      setLoadingProfile(false);
     });
 
     return () => unsub();
@@ -436,38 +439,27 @@ export default function App() {
   }, [profile, activeCourse]);
 
   // Logout
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setSessionEmail(null);
-      setProfile(null);
-      localStorage.removeItem('mm_session_email');
-      setCurrentView('dashboard');
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+  const handleLogout = () => {
+    setSessionEmail(null);
+    setProfile(null);
+    localStorage.removeItem('mm_session_email');
+    setCurrentView('dashboard');
   };
 
-  // Login Logic (Manual)
+  // Login Logic
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
-    if (!loginData.name.trim() || !loginData.email.trim()) {
-      return toast.error('Preencha todos os campos!');
-    }
+    if (!loginData.name || !loginData.email) return toast.error('Preencha os campos!');
     
-    if (loginData.name.trim().length < 3) {
-      return toast.error('O nome deve ter pelo menos 3 letras.');
-    }
-
-    setIsLoggingIn(true);
+    const email = loginData.email.toLowerCase().trim();
+    const isAdmin = email === 'brennomcpe10@gmail.com';
+    const name = isAdmin ? 'Halysson Brenno' : loginData.name;
+    
     try {
-      const email = loginData.email.toLowerCase().trim();
-      const name = loginData.name.trim();
       const userRef = doc(db, 'users', email);
       const userSnap = await getDoc(userRef);
-
+      
       if (!userSnap.exists()) {
-        const isAdmin = email === 'brennomcpe10@gmail.com';
         const newProfile: UserProfile = {
           name: name,
           email: email,
@@ -478,29 +470,20 @@ export default function App() {
         await setDoc(userRef, newProfile);
         toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
       } else {
+        // If admin logs in, ensure they are always monitor/approved even if data was manually changed
+        if (isAdmin) {
+          await setDoc(userRef, { role: 'monitor', approved: true }, { merge: true });
+        }
         toast.success('Bem-vindo de volta!');
       }
 
       setSessionEmail(email);
       localStorage.setItem('mm_session_email', email);
     } catch (error) {
-      console.error('Login Error:', error);
-      toast.error('Erro ao conectar ao banco de dados.');
-    } finally {
-      setIsLoggingIn(false);
+      console.error(error);
+      toast.error('Erro ao conectar ao Firebase.');
     }
   };
-
-  if (loadingProfile && sessionEmail) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-          <p className="text-slate-500 font-bold animate-pulse">Carregando seu portal...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (!profile) {
     return (
@@ -511,57 +494,38 @@ export default function App() {
               <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-600/30">
                 <Calculator className="w-8 h-8" />
               </div>
-              <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-4">Monitoria 3º Ano C</h1>
-              <p className="text-slate-500 font-medium leading-relaxed">Sua jornada rumo ao conhecimento em todas as áreas.</p>
+              <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-2">Monitoria 3º Ano C</h1>
+              <p className="text-slate-400 font-medium">Plataforma de simulados matemáticos</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Nome Completo</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">Seu Nome</label>
                 <input 
-                  className="w-full h-14 px-5 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:outline-none focus:border-indigo-600 transition-all font-bold" 
-                  value={loginData.name} 
-                  onChange={e => setLoginData({...loginData, name: e.target.value})} 
-                  placeholder="Ex: João Silva" 
+                  className="w-full h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
+                  value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} placeholder="Ex: João Silva" 
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Melhor E-mail</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">E-mail</label>
                 <input 
-                  type="email"
-                  className="w-full h-14 px-5 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:outline-none focus:border-indigo-600 transition-all font-bold" 
-                  value={loginData.email} 
-                  onChange={e => setLoginData({...loginData, email: e.target.value})} 
-                  placeholder="aluno@escola.com" 
+                  className="w-full h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
+                  value={loginData.email} onChange={e => setLoginData({...loginData, email: e.target.value})} placeholder="jose@escola.com" 
                 />
               </div>
-
-              <div className="flex flex-col gap-2 py-2">
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100/30">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  <p className="text-[10px] font-bold text-emerald-700">✅ Ex: João Silva ou Maria Oliveira</p>
-                </div>
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100/30">
-                  <XCircle className="w-4 h-4 text-rose-500" />
-                  <p className="text-[10px] font-bold text-rose-700">❌ Ex: Destruidor de Ego ou Aluno 123</p>
-                </div>
-              </div>
-
               <button 
                 type="submit"
-                disabled={isLoggingIn}
-                className="w-full h-16 bg-indigo-600 text-white rounded-[1.25rem] font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center"
+                className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all mt-4"
               >
-                {isLoggingIn ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Entrar na Plataforma'}
+                Entrar na Plataforma
               </button>
             </form>
-            
-            <div className="mt-10 pt-8 border-t border-slate-100 text-center">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Acesso Restrito ao 3º Ano C</p>
+            <div className="mt-8 pt-8 border-t border-slate-100 text-center">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Apenas Alunos Autorizados</p>
             </div>
           </div>
         </motion.div>
-        <Toaster richColors position="bottom-center" />
+        <Toaster richColors position="top-center" />
       </div>
     );
   }
