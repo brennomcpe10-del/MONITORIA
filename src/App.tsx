@@ -580,18 +580,19 @@ export default function App() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[900] bg-slate-50 flex flex-col items-center justify-center p-6 sm:p-12 overflow-y-auto"
+        className="fixed inset-0 z-[900] bg-slate-50 flex flex-col items-center py-12 px-6 sm:justify-center overflow-y-auto"
       >
-        <div className="max-w-6xl w-full text-center">
+        <div className="max-w-6xl w-full text-center flex flex-col items-center">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
+            className="mb-10 sm:mb-20"
           >
             <h1 className="text-3xl sm:text-5xl font-black text-slate-900 tracking-tight italic mb-4">
               O que vamos aprender hoje, <span className="text-indigo-600">{profile.name.split(' ')[0]}</span>?
             </h1>
-            <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px] sm:text-xs mb-12 sm:mb-20">Selecione um módulo para iniciar</p>
+            <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px] sm:text-xs">Selecione um módulo para iniciar</p>
           </motion.div>
           
           <motion.div 
@@ -604,7 +605,7 @@ export default function App() {
                 }
               }
             }}
-            className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10"
+            className="flex flex-col sm:grid sm:grid-cols-3 gap-8 sm:gap-10 w-full items-center"
           >
             {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map((c) => {
               const theme = COURSE_THEMES[c];
@@ -621,18 +622,18 @@ export default function App() {
                     setActiveCourse(c);
                     setHasSelectedInitialCourse(true);
                   }}
-                  className="group relative overflow-hidden"
+                  className="group relative w-full flex justify-center"
                 >
-                  <div className={`aspect-[4/5] sm:aspect-[3/4] rounded-[3rem] ${theme.classes.bg} p-10 flex flex-col items-center justify-center text-white shadow-2xl ${theme.classes.shadow} transition-all duration-300`}>
+                  <div className={`w-full max-w-[320px] sm:max-w-none rounded-[2.5rem] sm:rounded-[3rem] ${theme.classes.bg} py-12 px-8 sm:py-20 sm:px-10 flex flex-col items-center justify-center text-white shadow-2xl ${theme.classes.shadow} transition-all duration-300 relative overflow-hidden`}>
                     <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 blur-[60px] rounded-full"></div>
+                    <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/10 blur-[50px] rounded-full"></div>
                     
-                    <div className="relative mb-8 transform transition-all duration-300 group-hover:scale-110">
-                       <theme.icon className="w-16 h-16 sm:w-24 sm:h-24 stroke-[1.5]" />
+                    <div className="relative mb-6 sm:mb-10 transform transition-all duration-300 group-hover:scale-110">
+                       <theme.icon className="w-14 h-14 sm:w-24 sm:h-24 stroke-[1.5]" />
                     </div>
                     
                     <h2 className="relative text-2xl sm:text-3xl font-black italic uppercase tracking-tighter mb-2">{c}</h2>
-                    <p className="relative text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Entrar no Módulo</p>
+                    <p className="relative text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Entrar no Módulo</p>
                   </div>
                 </motion.button>
               );
@@ -644,7 +645,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.8 }}
             onClick={handleLogout}
-            className="mt-16 sm:mt-24 text-slate-300 hover:text-rose-500 font-black uppercase text-[10px] tracking-[0.4em] transition-all flex items-center gap-2 mx-auto"
+            className="mt-12 sm:mt-24 text-slate-300 hover:text-rose-500 font-black uppercase text-[10px] tracking-[0.4em] transition-all flex items-center gap-2"
           >
             <LogOut className="w-4 h-4" /> Sair da Conta
           </motion.button>
