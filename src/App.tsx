@@ -356,9 +356,9 @@ export default function App() {
           setPrecisaCadastrarNome(false);
         }
       } else {
-        // Handle case where user might have been deleted or is new
+        // Usuário novo (não existe no DB)
         setProfile(null);
-        // We don't clear sessionEmail here if we are about to onboard
+        setPrecisaCadastrarNome(true);
       }
       setLoadingProfile(false);
     }, (error) => {
@@ -555,7 +555,7 @@ export default function App() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 selection:bg-indigo-100">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
           <div className="rounded-[2.5rem] bg-white p-10 shadow-2xl shadow-slate-200 border border-slate-100">
-            {!sessionEmail || (!profile && !precisaCadastrarNome) ? (
+            {!sessionEmail ? (
               <>
                 <div className="flex flex-col items-center mb-10 text-center">
                   <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-600/30">
