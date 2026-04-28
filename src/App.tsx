@@ -34,7 +34,8 @@ import {
   Youtube,
   ExternalLink,
   Menu,
-  ShieldCheck
+  ShieldCheck,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -284,6 +285,7 @@ export default function App() {
   const [activeCourse, setActiveCourse] = useState<Course>('Matemática');
   const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor' | 'videos'>('dashboard');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [showMobileCourses, setShowMobileCourses] = useState(false);
 
   // Segurança: Bloqueio de Acesso indevido à Monitoria
   useEffect(() => {
@@ -557,25 +559,17 @@ export default function App() {
       {/* Navbar Fixed */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-100 px-4 sm:px-6 h-20 flex items-center">
         <div className="max-w-7xl mx-auto w-full flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setShowMobileSidebar(true)}
-              className="md:hidden w-10 h-10 flex items-center justify-center bg-slate-100 rounded-xl text-slate-500 active:scale-95 transition-all"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => setCurrentView('dashboard')}>
-              <div className={`w-10 h-10 sm:w-12 sm:h-12 ${theme.classes.bg} rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg ${theme.classes.shadow}`}>
-                <theme.icon className="w-5 h-5 sm:w-6 sm:h-6" />
-              </div>
-              <div className="hidden xs:block">
-                <h2 className="text-sm sm:text-xl font-black tracking-tighter leading-none mb-1">Monitoria <span className={theme.classes.text}>3º C</span></h2>
-                <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>{theme.title}</p>
-              </div>
+          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => { setCurrentView('dashboard'); setShowMobileSidebar(false); }}>
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 ${theme.classes.bg} rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg ${theme.classes.shadow}`}>
+              <theme.icon className="w-5 h-5 sm:w-6 sm:h-6" />
+            </div>
+            <div className="block">
+              <h2 className="text-sm sm:text-xl font-black tracking-tighter leading-none mb-0.5 sm:mb-1">Monitoria <span className={theme.classes.text}>3º C</span></h2>
+              <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>Módulo de {activeCourse}</p>
             </div>
           </div>
 
+          {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-2">
             <button 
               onClick={() => { setCurrentView('dashboard'); setShowMenu(false); }}
@@ -663,9 +657,19 @@ export default function App() {
                 {profile.email === 'brennomcpe10@gmail.com' ? 'Admin' : (profile.permissions?.[normalizeCourseKey(activeCourse)] === 'monitor' ? 'Monitor' : 'Aluno')}
               </p>
             </div>
-            <button onClick={handleLogout} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200 active:scale-95">
-              <LogOut className="w-5 h-5" />
-            </button>
+            
+            <div className="flex items-center gap-2">
+              <button onClick={handleLogout} className="hidden sm:flex w-10 h-10 rounded-xl bg-slate-50 items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200 active:scale-95">
+                <LogOut className="w-5 h-5" />
+              </button>
+              
+              <button 
+                onClick={() => setShowMobileSidebar(true)}
+                className="md:hidden w-11 h-11 flex items-center justify-center bg-slate-100 rounded-xl text-slate-700 active:scale-95 transition-all shadow-sm border border-slate-200"
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -703,29 +707,60 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-2 flex-grow">
+              <div className="space-y-1.5 flex-grow overflow-y-auto">
                 <button 
-                  onClick={() => { setCurrentView('dashboard'); setShowMobileSidebar(false); }}
-                  className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'dashboard' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                  onClick={() => { setCurrentView('dashboard'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                  className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'dashboard' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
                 >
                   <LayoutDashboard className="w-6 h-6" /> Início
                 </button>
+                
                 <button 
-                  onClick={() => { setShowMenu(true); setShowMobileSidebar(false); }}
-                  className="w-full p-4 rounded-2xl flex items-center gap-4 font-black text-slate-500 hover:bg-slate-50 transition-all"
+                  onClick={() => setShowMobileCourses(!showMobileCourses)}
+                  className={`w-full p-5 rounded-[1.5rem] flex items-center justify-between font-black transition-all ${showMobileCourses ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
                 >
-                  <BookOpen className="w-6 h-6" /> Menu de Cursos
+                  <div className="flex items-center gap-4 text-left">
+                    <BookOpen className="w-6 h-6" /> Trocar Curso
+                  </div>
+                  <ChevronDown className={`w-5 h-5 transition-transform ${showMobileCourses ? 'rotate-180 text-slate-400' : ''}`} />
                 </button>
+
+                <AnimatePresence>
+                  {showMobileCourses && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden bg-slate-50 rounded-3xl mb-2"
+                    >
+                      <div className="p-2 space-y-1">
+                        {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map(c => (
+                          <button 
+                            key={c}
+                            onClick={() => { handleCourseSwitch(c); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                            className={`flex items-center gap-3 w-full p-4 rounded-2xl transition-all text-left ${activeCourse === c ? `${theme.classes.bg} text-white shadow-md` : 'hover:bg-slate-100 text-slate-600'}`}
+                          >
+                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${activeCourse === c ? 'bg-white/20' : 'bg-white text-slate-400 shadow-sm'}`}>
+                               {React.createElement(COURSE_THEMES[c].icon, { className: "w-4 h-4" })}
+                             </div>
+                             <p className="font-bold text-sm">{c}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <button 
-                  onClick={() => { setCurrentView('videos'); setShowMobileSidebar(false); }}
-                  className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                  onClick={() => { setCurrentView('videos'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                  className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
                 >
                   <Youtube className="w-6 h-6" /> Videoaulas
                 </button>
                 {verificarSeEhMonitor(profile, activeCourse) && (
                   <button 
-                    onClick={() => { setCurrentView('monitor'); setShowMobileSidebar(false); }}
-                    className={`w-full p-4 rounded-2xl flex items-center gap-4 font-black transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg` : 'text-indigo-600 bg-indigo-50 shadow-sm border border-indigo-100'}`}
+                    onClick={() => { setCurrentView('monitor'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                    className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'monitor' ? `${theme.classes.bg} text-white shadow-lg` : 'text-indigo-600 bg-indigo-50 shadow-sm border border-indigo-100'}`}
                   >
                     <ShieldCheck className="w-6 h-6" /> Ver Monitoria
                   </button>
