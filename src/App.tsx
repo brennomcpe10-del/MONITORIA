@@ -380,8 +380,16 @@ export default function App() {
       const qData = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as Question))
         .filter(q => {
-          // Se não houver campo 'course', trata como 'Matemática'
-          const course = q.course || 'Matemática';
+          // Se não houver campo 'course' ou 'curso', trata como 'Matemática'
+          const course = q.course || (q as any).curso || 'Matemática';
+          
+          // Se estamos em Matemática, aceitamos questões sem curso
+          if (activeCourse === 'Matemática' && (!q.course && !(q as any).curso)) {
+            // Correção Automática Opcional: Salvar cursoAtivo se não existir
+            updateDoc(doc(db, 'questions', q.id), { course: 'Matemática' }).catch(() => {});
+            return true;
+          }
+
           return course === activeCourse;
         });
       setQuestions(qData);
@@ -1434,10 +1442,10 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
                   : <span className="flex items-center gap-1 text-rose-600 font-bold text-sm"><XCircle className="w-4 h-4" /> Errou feio</span>
                 }
               </div>
-              {(q.imageUrl || (q as any).imagemUrl) && (
+              {(q.imageUrl || (q as any).imagemUrl || (q as any).imagem) && (
                 <div className="mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50 max-w-full">
                   <img 
-                    src={q.imageUrl || (q as any).imagemUrl} 
+                    src={q.imageUrl || (q as any).imagemUrl || (q as any).imagem} 
                     alt="Contexto da questão" 
                     className="max-w-full h-auto rounded-[8px]" 
                     onError={(e) => (e.currentTarget.parentElement!.style.display = 'none')}
@@ -1495,10 +1503,10 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
              </span>
            )}
          </div>
-         {(q.imageUrl || (q as any).imagemUrl) && !imageError && (
+         {(q.imageUrl || (q as any).imagemUrl || (q as any).imagem) && !imageError && (
            <div className="mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
              <img 
-               src={q.imageUrl || (q as any).imagemUrl} 
+               src={q.imageUrl || (q as any).imagemUrl || (q as any).imagem} 
                alt="Contexto da questão" 
                className="max-w-full h-auto rounded-[8px]" 
                onError={() => setImageError(true)}
@@ -2130,10 +2138,10 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                                       <div className="flex items-center justify-between">
                                         <Badge color="rose">Erro em {new Date(m.date).toLocaleDateString('pt-BR')}</Badge>
                                       </div>
-                                      {(m.imageUrl || m.imagemUrl) && (
-                                        <div className="mt-2 mb-3 rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
+                                      {(m.imageUrl || m.imagemUrl || m.imagem) && (
+                                        <div className="mt-2 mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
                                           <img 
-                                            src={m.imageUrl || m.imagemUrl} 
+                                            src={m.imageUrl || m.imagemUrl || m.imagem} 
                                             alt="Contexto" 
                                             className="max-w-full h-auto rounded-[8px]"
                                             onError={(e) => (e.currentTarget.parentElement!.style.display = 'none')}
