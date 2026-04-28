@@ -268,9 +268,8 @@ export default function App() {
     return localStorage.getItem('mm_session_email');
   });
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [onboardingName, setOnboardingName] = useState('');
-  const [isSubmittingName, setIsSubmittingName] = useState(false);
-  const [precisaCadastrarNome, setPrecisaCadastrarNome] = useState(false);
+  const [loginData, setLoginData] = useState({ name: '', email: '' });
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
   // --- App State ---
@@ -322,21 +321,6 @@ export default function App() {
     }, 1200);
   };
 
-  // 0. Listen to Auth State
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user && user.email) {
-        setSessionEmail(user.email);
-        localStorage.setItem('mm_session_email', user.email);
-      } else {
-        setSessionEmail(null);
-        localStorage.removeItem('mm_session_email');
-        setProfile(null);
-      }
-    });
-    return () => unsub();
-  }, []);
-
   // 1. Sync Profile in real-time
   useEffect(() => {
     if (!sessionEmail) {
@@ -350,15 +334,11 @@ export default function App() {
       if (docSnap.exists()) {
         const data = docSnap.data() as UserProfile;
         setProfile(data);
-        if (!data.name) {
-          setPrecisaCadastrarNome(true);
-        } else {
-          setPrecisaCadastrarNome(false);
-        }
       } else {
-        // Usuário novo (não existe no DB)
+        // Handle case where user might have been deleted
         setProfile(null);
-        setPrecisaCadastrarNome(true);
+        setSessionEmail(null);
+        localStorage.removeItem('mm_session_email');
       }
       setLoadingProfile(false);
     }, (error) => {
@@ -468,74 +448,46 @@ export default function App() {
     }
   };
 
-  // Login Logic (Google)
-  const handleGoogleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      // Enforce selection of an account
-      provider.setCustomParameters({ prompt: 'select_account' });
-      
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      
-      if (!user.email) throw new Error('E-mail não retornado pelo Google.');
+  // Login Logic (Manual)
+  const handleLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!loginData.name.trim() || !loginData.email.trim()) {
+      return toast.error('Preencha todos os campos!');
+    }
+    
+    if (loginData.name.trim().length < 3) {
+      return toast.error('O nome deve ter pelo menos 3 letras.');
+    }
 
-      const userRef = doc(db, 'users', user.email);
+    setIsLoggingIn(true);
+    try {
+      const email = loginData.email.toLowerCase().trim();
+      const name = loginData.name.trim();
+      const userRef = doc(db, 'users', email);
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
-        // Novo usuário: precisa cadastrar nome
-        setSessionEmail(user.email);
-        localStorage.setItem('mm_session_email', user.email);
-        setPrecisaCadastrarNome(true);
+        const isAdmin = email === 'brennomcpe10@gmail.com';
+        const newProfile: UserProfile = {
+          name: name,
+          email: email,
+          role: isAdmin ? 'monitor' : 'student',
+          approved: isAdmin ? true : false,
+          lastMissedQuestionIds: []
+        };
+        await setDoc(userRef, newProfile);
+        toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
       } else {
-        // Usuário existente
-        const data = userSnap.data() as UserProfile;
-        if (!data.name) {
-          setPrecisaCadastrarNome(true);
-        }
-        setSessionEmail(user.email);
-        localStorage.setItem('mm_session_email', user.email);
         toast.success('Bem-vindo de volta!');
       }
-    } catch (error: any) {
-      console.error('Google Login Error:', error);
-      if (error.code !== 'auth/popup-closed-by-user') {
-        alert('Erro ao logar com Google. Verifique se os pop-ups estão permitidos.');
-        toast.error('Erro ao entrar com Google.');
-      }
-    }
-  };
 
-  const handleFinishOnboarding = async (e: FormEvent) => {
-    e.preventDefault();
-    if (onboardingName.trim().length < 3 || !sessionEmail) return;
-
-    setIsSubmittingName(true);
-    try {
-      const email = sessionEmail;
-      const userRef = doc(db, 'users', email);
-      const isAdmin = email === 'brennomcpe10@gmail.com';
-      const finalName = onboardingName.trim();
-      
-      const newProfile: UserProfile = {
-        name: finalName,
-        email: email,
-        role: isAdmin ? 'monitor' : 'student',
-        approved: isAdmin ? true : false,
-        lastMissedQuestionIds: []
-      };
-
-      await setDoc(userRef, newProfile);
-      setProfile(newProfile);
-      setPrecisaCadastrarNome(false);
-      toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
+      setSessionEmail(email);
+      localStorage.setItem('mm_session_email', email);
     } catch (error) {
-      console.error('Onboarding Error:', error);
-      alert('Erro ao salvar seu nome no banco de dados.');
-      toast.error('Erro ao salvar seu nome.');
+      console.error('Login Error:', error);
+      toast.error('Erro ao conectar ao banco de dados.');
     } finally {
-      setIsSubmittingName(false);
+      setIsLoggingIn(false);
     }
   };
 
@@ -550,91 +502,66 @@ export default function App() {
     );
   }
 
-  if (!profile || precisaCadastrarNome) {
+  if (!profile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 selection:bg-indigo-100">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
           <div className="rounded-[2.5rem] bg-white p-10 shadow-2xl shadow-slate-200 border border-slate-100">
-            {!sessionEmail ? (
-              <>
-                <div className="flex flex-col items-center mb-10 text-center">
-                  <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-600/30">
-                    <Calculator className="w-8 h-8" />
-                  </div>
-                  <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-4">Monitoria 3º Ano C</h1>
-                  <p className="text-slate-500 font-medium leading-relaxed">Sua jornada rumo ao conhecimento em todas as áreas.</p>
+            <div className="flex flex-col items-center mb-10 text-center">
+              <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-600/30">
+                <Calculator className="w-8 h-8" />
+              </div>
+              <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-4">Monitoria 3º Ano C</h1>
+              <p className="text-slate-500 font-medium leading-relaxed">Sua jornada rumo ao conhecimento em todas as áreas.</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Nome Completo</label>
+                <input 
+                  className="w-full h-14 px-5 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:outline-none focus:border-indigo-600 transition-all font-bold" 
+                  value={loginData.name} 
+                  onChange={e => setLoginData({...loginData, name: e.target.value})} 
+                  placeholder="Ex: João Silva" 
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Seu Melhor E-mail</label>
+                <input 
+                  type="email"
+                  className="w-full h-14 px-5 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:outline-none focus:border-indigo-600 transition-all font-bold" 
+                  value={loginData.email} 
+                  onChange={e => setLoginData({...loginData, email: e.target.value})} 
+                  placeholder="aluno@escola.com" 
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 py-2">
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100/30">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <p className="text-[10px] font-bold text-emerald-700">✅ Ex: João Silva ou Maria Oliveira</p>
                 </div>
-
-                <button 
-                  onClick={handleGoogleLogin}
-                  className="w-full h-16 bg-white text-slate-700 rounded-2xl font-black text-lg shadow-sm border-2 border-slate-100 hover:border-indigo-600 hover:bg-slate-50 active:scale-[0.98] transition-all flex items-center justify-center gap-4 group"
-                >
-                  <svg className="w-6 h-6 transition-transform group-hover:scale-110" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.1c-.22-.66-.35-1.39-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Entrar com Google
-                </button>
-              </>
-            ) : (
-              <form onSubmit={handleFinishOnboarding}>
-                <div className="flex flex-col items-center mb-8 text-center">
-                  <div className="w-16 h-16 bg-emerald-100 rounded-3xl flex items-center justify-center text-emerald-600 mb-6 font-black text-2xl">
-                    ?
-                  </div>
-                  <h1 className="text-2xl font-black tracking-tight text-slate-900 leading-none mb-3">Como devemos te chamar?</h1>
-                  <p className="text-slate-400 text-sm font-medium leading-relaxed px-4">Precisamos do seu nome real para acompanhamento pedagógico.</p>
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100/30">
+                  <XCircle className="w-4 h-4 text-rose-500" />
+                  <p className="text-[10px] font-bold text-rose-700">❌ Ex: Destruidor de Ego ou Aluno 123</p>
                 </div>
+              </div>
 
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <input 
-                      autoFocus
-                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border-2 border-slate-100 focus:outline-none focus:border-indigo-600 transition-all font-bold text-center text-lg" 
-                      placeholder="Ex: João Victor Silva" 
-                      value={onboardingName}
-                      onChange={e => setOnboardingName(e.target.value)}
-                    />
-                    
-                    <div className="flex flex-col gap-2 pt-2">
-                      <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100/50">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        <p className="text-[11px] font-bold text-emerald-700">✅ Ex: João Silva ou Maria Oliveira</p>
-                      </div>
-                      <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100/50">
-                        <XCircle className="w-4 h-4 text-rose-500" />
-                        <p className="text-[11px] font-bold text-rose-700">❌ Ex: Destruidor de Ego ou Aluno 123</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button 
-                    disabled={onboardingName.trim().length < 3 || isSubmittingName}
-                    type="submit"
-                    className="w-full h-14 bg-indigo-600 disabled:bg-slate-200 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center"
-                  >
-                    {isSubmittingName ? 'Salvando...' : 'Finalizar Cadastro'}
-                  </button>
-
-                  <button 
-                    type="button"
-                    onClick={() => { setSessionEmail(null); localStorage.removeItem('mm_session_email'); }}
-                    className="w-full text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-slate-500"
-                  >
-                    Trocar Conta
-                  </button>
-                </div>
-              </form>
-            )}
+              <button 
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full h-16 bg-indigo-600 text-white rounded-[1.25rem] font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center"
+              >
+                {isLoggingIn ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Entrar na Plataforma'}
+              </button>
+            </form>
             
             <div className="mt-10 pt-8 border-t border-slate-100 text-center">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Acesso Restrito ao 3º Ano C</p>
             </div>
           </div>
         </motion.div>
-        <Toaster richColors position="top-center" />
+        <Toaster richColors position="bottom-center" />
       </div>
     );
   }
