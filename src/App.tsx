@@ -178,6 +178,7 @@ interface UserProfile {
   email: string;
   role: Role;
   approved: boolean;
+  materia?: Course;
   permissions?: Record<string, 'monitor' | 'estudante'>;
   // Progress (Per Course)
   courses?: Record<string, CourseProgress>;
@@ -201,6 +202,7 @@ interface UserSummary {
   email: string;
   role: Role;
   approved: boolean;
+  materia?: Course;
   permissions?: Record<string, 'monitor' | 'estudante'>;
   missedTopics?: string[];
   totalSimulated?: number;
@@ -1815,7 +1817,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
 function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin, profile }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean, profile: UserProfile }) {
   const theme = COURSE_THEMES[activeCourse];
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
-  const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+  const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse as Course });
   const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [bulkJson, setBulkJson] = useState('');
@@ -1835,12 +1837,11 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
     if (!userToApprove) return;
     try {
       const userRef = doc(db, 'users', userToApprove.email);
-      // Construct the update object for permissions
-      const currentPermissions = userToApprove.permissions || {};
       
       await updateDoc(userRef, { 
         approved: true, 
         role: 'monitor',
+        materia: course,
         [`permissions.${normalizeCourseKey(course)}`]: 'monitor'
       });
       
@@ -1848,7 +1849,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       setUserToApprove(null);
     } catch (e: any) {
       console.error(e);
-      alert('Erro ao aprovar monitor: ' + e.message);
+      toast.error('Erro ao aprovar monitor: ' + e.message);
     }
   };
 
@@ -2092,7 +2093,8 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       options: [...q.options],
       correctIndex: q.correctIndex,
       explanation: q.explanation,
-      imageUrl: q.imageUrl || (q as any).imagemUrl || (q as any).imagem || ''
+      imageUrl: q.imageUrl || (q as any).imagemUrl || (q as any).imagem || '',
+      course: (q.course || activeCourse) as Course
     });
     setEditingId(q.id);
     setShowEditModal(true);
@@ -2210,9 +2212,9 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                     <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                       <th className="px-8 py-6">Nome</th>
                       <th className="px-8 py-6">E-mail</th>
+                      <th className="px-8 py-6 italic">Status do Usuário</th>
                       <th className="px-8 py-6">Simulados</th>
-                      <th className="px-8 py-6">Status</th>
-                      <th className="px-8 py-6 text-right">Ações</th>
+                      <th className="px-8 py-6 text-right">Controle</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2228,27 +2230,34 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                         </td>
                         <td className="px-8 py-6 text-sm text-slate-400 font-medium">{u.email}</td>
                         <td className="px-8 py-6">
-                           <div className="flex flex-col">
-                             <span className="text-sm font-black text-slate-700">{userStatsMap[u.email]?.count || 0}</span>
-                             {userStatsMap[u.email]?.totalQuestions ? (
-                               <span className={`text-[10px] font-bold ${theme.classes.text}`}>
-                                 {((userStatsMap[u.email]?.totalCorrect || 0) / userStatsMap[u.email]?.totalQuestions * 100).toFixed(0)}% de acerto
-                               </span>
-                             ) : (
-                               <span className="text-[10px] font-bold text-slate-300 italic">Sem dados</span>
-                             )}
-                           </div>
-                        </td>
-                        <td className="px-8 py-6">
                           {u.approved ? (
-                            <Badge color={u.role === 'monitor' ? theme.primary as any : 'emerald'}>
-                              {u.role === 'estudante' ? 'Estudante' : u.role}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                               <span className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-black uppercase tracking-widest">
+                                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> Aprovado
+                               </span>
+                               {u.role === 'monitor' && (
+                                 <Badge color={(COURSE_THEMES[u.materia as Course]?.primary as any) || 'indigo'}>
+                                   Monitor: {u.materia || 'Geral'}
+                                 </Badge>
+                               )}
+                            </div>
                           ) : (
                             <span className="flex items-center gap-1.5 text-amber-500 text-[10px] font-black uppercase tracking-widest">
-                              <Loader2 className="w-3 h-3 animate-spin" /> Pendente
+                              <div className="w-2 h-2 rounded-full bg-amber-400"></div> Pendente
                             </span>
                           )}
+                        </td>
+                        <td className="px-8 py-6">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-black text-slate-700">{userStatsMap[u.email]?.count || 0}</span>
+                              {userStatsMap[u.email]?.totalQuestions ? (
+                                <span className={`text-[10px] font-bold ${theme.classes.text}`}>
+                                  {((userStatsMap[u.email]?.totalCorrect || 0) / userStatsMap[u.email]?.totalQuestions * 100).toFixed(0)}% de acerto
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-300 italic">Sem dados</span>
+                              )}
+                            </div>
                         </td>
                         <td className="px-8 py-6 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -2793,7 +2802,26 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
              </h3>
              <form onSubmit={handleSaveQuestion} className="space-y-8">
-               <div className="grid md:grid-cols-2 gap-6">
+               <div className="grid md:grid-cols-3 gap-6">
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Matéria/Disciplina</label>
+                   {isAdmin ? (
+                     <select 
+                        className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold"
+                        value={newQ.course || activeCourse}
+                        onChange={e => setNewQ({...newQ, course: e.target.value as Course})}
+                     >
+                       {Object.keys(COURSE_THEMES).map(c => (
+                         <option key={c} value={c}>{c}</option>
+                       ))}
+                     </select>
+                   ) : (
+                     <div className="w-full h-14 px-6 rounded-2xl bg-slate-100 border border-slate-200 flex items-center font-bold text-slate-500 cursor-not-allowed">
+                       {profile.materia || activeCourse}
+                       <ShieldCheck className="w-4 h-4 ml-auto text-emerald-500" />
+                     </div>
+                   )}
+                 </div>
                  <div className="space-y-2">
                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
@@ -2996,16 +3024,24 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
               </p>
               
               <div className="space-y-3">
-                {(['Matemática', 'Biologia', 'Português'] as Course[]).map(c => (
-                  <button
-                    key={c}
-                    onClick={() => handleCourseApproval(c)}
-                    className="w-full py-4 px-6 bg-slate-50 hover:bg-indigo-600 hover:text-white rounded-2xl font-black text-sm transition-all border border-slate-100 flex items-center justify-between group"
-                  >
-                    <span>{c}</span>
-                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all" />
-                  </button>
-                ))}
+                {(['Matemática', 'Biologia', 'Língua Portuguesa', 'Geografia'] as Course[]).map(c => {
+                  const cTheme = COURSE_THEMES[c];
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => handleCourseApproval(c)}
+                      className={`w-full py-4 px-6 rounded-2xl font-black text-sm transition-all border flex items-center justify-between group ${cTheme.classes.hoverBg} ${cTheme.classes.text} border-slate-100 hover:border-transparent`}
+                    >
+                      <div className="flex items-center gap-3">
+                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${cTheme.classes.lightBg}`}>
+                            <cTheme.icon className="w-4 h-4" />
+                         </div>
+                         <span>{c}</span>
+                      </div>
+                      <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all" />
+                    </button>
+                  );
+                })}
               </div>
               
               <button 
@@ -3038,7 +3074,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                     </div>
                  </div>
                  <button 
-                   onClick={() => { setShowEditModal(false); setEditingId(null); setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' }); }}
+                   onClick={() => { setShowEditModal(false); setEditingId(null); setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse }); }}
                    className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-all"
                  >
                     <XCircle className="w-6 h-6 text-slate-400" />
@@ -3047,7 +3083,25 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
 
               <div className="p-8 overflow-y-auto flex-1 bg-slate-50/50">
                 <form onSubmit={handleSaveQuestion} className="space-y-8">
-                  <div className="grid md:grid-cols-2 gap-6">
+                  <div className="grid md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Matéria</label>
+                      {isAdmin ? (
+                        <select 
+                           className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold"
+                           value={newQ.course || activeCourse}
+                           onChange={e => setNewQ({...newQ, course: e.target.value as Course})}
+                        >
+                          {Object.keys(COURSE_THEMES).map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="w-full h-14 px-6 rounded-2xl bg-slate-100 border border-slate-200 flex items-center font-bold text-slate-500 cursor-not-allowed">
+                          {profile.materia || activeCourse}
+                        </div>
+                      )}
+                    </div>
                     <div className="space-y-2">
                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                        <input className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
