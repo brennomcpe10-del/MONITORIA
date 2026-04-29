@@ -1788,9 +1788,16 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
 
     try {
       if (selectedFile) {
-        const fileRef = ref(storage, `questoes/${Date.now()}_${selectedFile.name}`);
-        const snapshot = await uploadBytes(fileRef, selectedFile);
-        finalImageUrl = await getDownloadURL(snapshot.ref);
+        try {
+          const fileRef = ref(storage, `questoes/${Date.now()}_${selectedFile.name}`);
+          const snapshot = await uploadBytes(fileRef, selectedFile);
+          finalImageUrl = await getDownloadURL(snapshot.ref);
+        } catch (uploadError: any) {
+          setIsUploading(false);
+          console.error("Upload error:", uploadError);
+          alert(`Erro crítico no upload: ${uploadError.message || 'Sem permissão ou erro de rede'}`);
+          return;
+        }
       }
 
       const id = editingId || Math.random().toString(36).substring(2, 11);
@@ -1802,7 +1809,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       setShowEditModal(false);
       if (!editingId) setActiveTab('list');
     } catch (e) {
-      toast.error('Erro ao salvar questão.');
+      toast.error('Erro ao salvar questão no banco de dados.');
     } finally {
       setIsUploading(false);
     }
