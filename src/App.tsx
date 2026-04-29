@@ -59,7 +59,6 @@ import {
   writeBatch,
   updateDoc
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // --- Firebase Config ---
 const firebaseConfig = {
@@ -74,7 +73,6 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const storage = getStorage(app);
 
 // --- Themes ---
 const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, title: string, classes: any }> = {
@@ -1789,13 +1787,51 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
     try {
       if (selectedFile) {
         try {
-          const fileRef = ref(storage, `questoes/${Date.now()}_${selectedFile.name}`);
-          const snapshot = await uploadBytes(fileRef, selectedFile);
-          finalImageUrl = await getDownloadURL(snapshot.ref);
-        } catch (uploadError: any) {
+          // Plato B: Base64 with Optimization
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(selectedFile);
+            reader.onload = () => {
+              const img = new Image();
+              img.src = reader.result as string;
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                const MAX_SIZE = 800; // Otimização para Firestore
+
+                if (width > MAX_SIZE || height > MAX_SIZE) {
+                  if (width > height) {
+                    height *= MAX_SIZE / width;
+                    width = MAX_SIZE;
+                  } else {
+                    width *= MAX_SIZE / height;
+                    height = MAX_SIZE;
+                  }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.6)); // Qualidade reduzida para economizar espaço
+              };
+              img.onerror = reject;
+            };
+            reader.onerror = reject;
+          });
+          finalImageUrl = base64;
+          
+          // Verificar tamanho final (Limite do Firestore é 1MB)
+          if (finalImageUrl.length > 800000) { // ~800KB seguro
+            setIsUploading(false);
+            alert('A imagem ainda é muito grande mesmo após redução. Tente uma imagem com menos detalhes.');
+            return;
+          }
+        } catch (error) {
           setIsUploading(false);
-          console.error("Upload error:", uploadError);
-          alert(`Erro crítico no upload: ${uploadError.message || 'Sem permissão ou erro de rede'}`);
+          console.error("Conversion error:", error);
+          alert('Erro ao processar imagem para Base64.');
           return;
         }
       }
