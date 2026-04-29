@@ -1370,6 +1370,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
   const [ans, setAns] = useState<(number | null)[]>([]);
+  const [timeElapsed, setTimeElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
@@ -1377,9 +1378,27 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
 
   const progressKey = `simulado_progresso_${profile?.email}_${normalizeCourseKey(activeCourse)}`;
 
+  // Formatter for MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   useEffect(() => {
     setImageError(false);
   }, [idx]);
+
+  // Timer logic
+  useEffect(() => {
+    let interval: any;
+    if (!loading && !finished) {
+      interval = setInterval(() => {
+        setTimeElapsed(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [loading, finished]);
 
   const initializeQuiz = (resumeData?: any) => {
     setLoading(true);
@@ -1397,6 +1416,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
             setQuestions(savedQuestions);
             setAns(resumeData.ans);
             setIdx(resumeData.idx);
+            setTimeElapsed(resumeData.timeElapsed || 0);
             setLoading(false);
             return;
           }
@@ -1478,11 +1498,12 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
         questionIds: questions.map(q => q.id),
         ans,
         idx,
+        timeElapsed,
         course: activeCourse
       };
       localStorage.setItem(progressKey, JSON.stringify(prog));
     }
-  }, [ans, idx, questions, loading, finished]);
+  }, [ans, idx, questions, loading, finished, timeElapsed]);
 
   const handleResume = () => {
     const saved = localStorage.getItem(progressKey);
@@ -1557,6 +1578,10 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
     // Clean progress on finish
     localStorage.removeItem(progressKey);
 
+    const avgTimePerQuestion = questions.length > 0 ? Math.round(timeElapsed / questions.length) : 0;
+    const avgMins = Math.floor(avgTimePerQuestion / 60);
+    const avgSecs = avgTimePerQuestion % 60;
+
     return (
       <div className="max-w-3xl mx-auto space-y-10 animate-in fade-in zoom-in-95 duration-500">
         <div className="rounded-[2.5rem] bg-white shadow-2xl overflow-hidden text-center border border-slate-100">
@@ -1565,22 +1590,32 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
               <h2 className="text-4xl font-black mb-2 italic">TAMO JUNTO!</h2>
               <p className="opacity-70 font-bold uppercase tracking-widest text-[10px]">Simulado concluído com sucesso</p>
            </div>
-           <div className="p-12 relative -mt-10 bg-white rounded-[2rem] mx-8 shadow-xl grid md:grid-cols-2 lg:grid-cols-3 gap-10 items-center">
-              <div className="lg:col-span-1 border-r border-slate-100">
+           <div className="p-12 relative -mt-10 bg-white rounded-[2rem] mx-8 shadow-xl grid md:grid-cols-2 lg:grid-cols-4 gap-6 items-center">
+              <div className="lg:col-span-1 border-r border-slate-100 text-center">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pontuação</p>
-                <div className={`text-6xl font-black ${theme.classes.text}`}>{score}/{questions.length}</div>
+                <div className={`text-4xl font-black ${theme.classes.text}`}>{score}/{questions.length}</div>
                 <Badge color={theme.primary as any}>{questions.length > 0 ? ((score / questions.length) * 100).toFixed(0) : 0}% Acertos</Badge>
               </div>
-              <div className="text-left md:col-span-1 lg:col-span-2 space-y-4">
-                 <h4 className="font-bold text-slate-500 uppercase text-xs tracking-widest flex items-center gap-2"><Target className="w-4 h-4" /> Desempenho</h4>
+              <div className="lg:col-span-1 border-r border-slate-100 text-center">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tempo Total</p>
+                 <div className="text-3xl font-black text-slate-800">{formatTime(timeElapsed)}</div>
+              </div>
+              <div className="lg:col-span-1 border-r border-slate-100 text-center">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Média/Questão</p>
+                 <div className="text-2xl font-black text-indigo-600">
+                    {avgMins > 0 ? `${avgMins}m ${avgSecs}s` : `${avgSecs}s`}
+                 </div>
+              </div>
+              <div className="text-left md:col-span-1 lg:col-span-1 space-y-4">
+                 <h4 className="font-bold text-slate-500 uppercase text-xs tracking-widest flex items-center gap-2"><Target className="w-4 h-4" /> Temas</h4>
                  <div className="space-y-3">
                    {Object.entries(result.topicStats).map(([t, s]: any) => (
                       <div key={t} className="space-y-1">
-                        <div className="flex justify-between text-xs font-black">
-                          <span className="text-slate-700">{t}</span>
-                          <span className="text-slate-400">{(s.total - s.errors)}/{s.total}</span>
+                        <div className="flex justify-between text-[8px] font-black">
+                          <span className="text-slate-700 truncate max-w-[60px]">{t}</span>
+                          <span className="text-slate-400">{((s.total - s.errors) / s.total * 100).toFixed(0)}%</span>
                         </div>
-                        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                           <div className={`h-full ${theme.classes.bg}`} style={{ width: `${s.total > 0 ? ((s.total - s.errors) / s.total) * 100 : 0}%` }}></div>
                         </div>
                       </div>
@@ -1654,7 +1689,9 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
              <p className="font-black text-slate-400 uppercase text-xs tracking-widest">de {questions.length} Questões</p>
            </div>
            <div className="flex items-center gap-4 text-slate-400 font-bold text-xs uppercase tracking-widest">
-             <div className="flex items-center gap-2"><Timer className="w-4 h-4" /> 00:00</div>
+             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-300 ${ (timeElapsed / (idx + 1)) > 120 ? 'bg-rose-50 text-rose-600 animate-pulse ring-2 ring-rose-200' : (timeElapsed / (idx + 1)) > 90 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50' }`}>
+               <Timer className="w-4 h-4" /> {formatTime(timeElapsed)}
+             </div>
              <button onClick={() => { if(confirm('Deseja mesmo sair? Ao sair, seu progresso continuará salvo para quando você voltar.')) onFinish(null); }} className="hover:text-rose-500 transition-colors">Sair</button>
            </div>
          </div>
