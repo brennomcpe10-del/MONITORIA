@@ -2802,26 +2802,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
              </h3>
              <form onSubmit={handleSaveQuestion} className="space-y-8">
-               <div className="grid md:grid-cols-3 gap-6">
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Matéria/Disciplina</label>
-                   {isAdmin ? (
-                     <select 
-                        className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold"
-                        value={newQ.course || activeCourse}
-                        onChange={e => setNewQ({...newQ, course: e.target.value as Course})}
-                     >
-                       {Object.keys(COURSE_THEMES).map(c => (
-                         <option key={c} value={c}>{c}</option>
-                       ))}
-                     </select>
-                   ) : (
-                     <div className="w-full h-14 px-6 rounded-2xl bg-slate-100 border border-slate-200 flex items-center font-bold text-slate-500 cursor-not-allowed">
-                       {profile.materia || activeCourse}
-                       <ShieldCheck className="w-4 h-4 ml-auto text-emerald-500" />
-                     </div>
-                   )}
-                 </div>
+               <div className="grid md:grid-cols-2 gap-6">
                  <div className="space-y-2">
                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
@@ -3083,25 +3064,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
 
               <div className="p-8 overflow-y-auto flex-1 bg-slate-50/50">
                 <form onSubmit={handleSaveQuestion} className="space-y-8">
-                  <div className="grid md:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Matéria</label>
-                      {isAdmin ? (
-                        <select 
-                           className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold"
-                           value={newQ.course || activeCourse}
-                           onChange={e => setNewQ({...newQ, course: e.target.value as Course})}
-                        >
-                          {Object.keys(COURSE_THEMES).map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="w-full h-14 px-6 rounded-2xl bg-slate-100 border border-slate-200 flex items-center font-bold text-slate-500 cursor-not-allowed">
-                          {profile.materia || activeCourse}
-                        </div>
-                      )}
-                    </div>
+                  <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                        <input className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
