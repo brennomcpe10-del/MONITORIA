@@ -36,7 +36,8 @@ import {
   Menu,
   ShieldCheck,
   ChevronDown,
-  Zap
+  Zap,
+  Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -91,7 +92,8 @@ const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, t
       lightBg: 'bg-indigo-50',
       darkHover: 'hover:bg-indigo-700',
       accText: 'text-indigo-600/50',
-      decoration: 'decoration-indigo-600'
+      decoration: 'decoration-indigo-600',
+      gradient: 'from-indigo-600 to-indigo-800'
     }
   },
   'Biologia': {
@@ -109,32 +111,53 @@ const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, t
       lightBg: 'bg-emerald-50',
       darkHover: 'hover:bg-emerald-700',
       accText: 'text-emerald-600/50',
-      decoration: 'decoration-emerald-600'
+      decoration: 'decoration-emerald-600',
+      gradient: 'from-emerald-500 to-emerald-700'
     }
   },
   'Língua Portuguesa': {
-    primary: 'violet',
-    hex: '#8b5cf6',
+    primary: 'rose',
+    hex: '#A93226',
     icon: BookOpen,
     title: 'Língua Portuguesa',
     classes: {
-      bg: 'bg-violet-600',
-      text: 'text-violet-600',
-      ring: 'focus:ring-violet-600/10',
-      border: 'focus:border-violet-600',
-      shadow: 'shadow-violet-600/30',
-      hoverBg: 'hover:bg-violet-50',
-      lightBg: 'bg-violet-50',
-      darkHover: 'hover:bg-violet-700',
-      accText: 'text-violet-600/50',
-      decoration: 'decoration-violet-600'
+      bg: 'bg-[#A93226]',
+      text: 'text-[#A93226]',
+      ring: 'focus:ring-[#A93226]/10',
+      border: 'focus:border-[#A93226]',
+      shadow: 'shadow-[#A93226]/30',
+      hoverBg: 'hover:bg-rose-50',
+      lightBg: 'bg-rose-50',
+      darkHover: 'hover:bg-[#8e2a20]',
+      accText: 'text-[#A93226]/50',
+      decoration: 'decoration-[#A93226]',
+      gradient: 'from-[#A93226] to-[#8e2a20]'
+    }
+  },
+  'Geografia': {
+    primary: 'orange',
+    hex: '#E67E22',
+    icon: Globe,
+    title: 'Geografia do Brasil',
+    classes: {
+      bg: 'bg-[#E67E22]',
+      text: 'text-[#E67E22]',
+      ring: 'focus:ring-[#E67E22]/10',
+      border: 'focus:border-[#E67E22]',
+      shadow: 'shadow-[#E67E22]/30',
+      hoverBg: 'hover:bg-orange-50',
+      lightBg: 'bg-orange-50',
+      darkHover: 'hover:bg-[#cf711f]',
+      accText: 'text-[#E67E22]/50',
+      decoration: 'decoration-[#E67E22]',
+      gradient: 'from-[#E67E22] to-[#cf711f]'
     }
   }
 };
 
 // --- Types & Interfaces ---
 type Role = 'estudante' | 'monitor';
-type Course = 'Matemática' | 'Biologia' | 'Língua Portuguesa';
+type Course = 'Matemática' | 'Biologia' | 'Língua Portuguesa' | 'Geografia';
 
 interface CourseProgress {
   lastMissedQuestionIds: string[];
@@ -228,7 +251,8 @@ const normalizeCourseKey = (course: string): string => {
   const map: Record<string, string> = {
     'Matemática': 'matematica',
     'Biologia': 'biologia',
-    'Língua Portuguesa': 'portugues'
+    'Língua Portuguesa': 'portugues',
+    'Geografia': 'geografia'
   };
   return map[course] || course.toLowerCase();
 };
@@ -274,13 +298,14 @@ const Card = ({ children, className = "" }: { children: React.ReactNode, classNa
   </div>
 );
 
-const Badge = ({ children, color = "indigo" }: { children: React.ReactNode, color?: "indigo" | "emerald" | "amber" | "rose" | "violet" }) => {
+const Badge = ({ children, color = "indigo" }: { children: React.ReactNode, color?: "indigo" | "emerald" | "amber" | "rose" | "violet" | "orange" }) => {
   const colors = {
     indigo: "bg-indigo-50 text-indigo-600 border-indigo-100",
     emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
     violet: "bg-violet-50 text-violet-600 border-violet-100",
     amber: "bg-amber-50 text-amber-600 border-amber-100",
-    rose: "bg-rose-50 text-rose-600 border-rose-100"
+    rose: "bg-[#A93226]/5 text-[#A93226] border-[#A93226]/10",
+    orange: "bg-[#E67E22]/5 text-[#E67E22] border-[#E67E22]/10"
   };
   return (
     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${colors[color]}`}>
@@ -613,9 +638,9 @@ export default function App() {
                 }
               }
             }}
-            className="flex flex-col sm:grid sm:grid-cols-3 gap-8 sm:gap-10 w-full items-center"
+            className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 w-full items-center"
           >
-            {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map((c) => {
+            {(['Matemática', 'Biologia', 'Língua Portuguesa', 'Geografia'] as Course[]).map((c) => {
               const theme = COURSE_THEMES[c];
               return (
                 <motion.button 
@@ -632,16 +657,18 @@ export default function App() {
                   }}
                   className="group relative w-full flex justify-center"
                 >
-                  <div className={`w-full max-w-[320px] sm:max-w-none rounded-[2.5rem] sm:rounded-[3rem] ${theme.classes.bg} py-12 px-8 sm:py-20 sm:px-10 flex flex-col items-center justify-center text-white shadow-2xl ${theme.classes.shadow} transition-all duration-300 relative overflow-hidden`}>
+                  <div className={`w-full max-w-[320px] sm:max-w-none rounded-[2.5rem] sm:rounded-[3rem] bg-gradient-to-br ${theme.classes.gradient} py-12 px-8 sm:py-20 sm:px-10 flex flex-col items-center justify-center text-white shadow-2xl ${theme.classes.shadow} transition-all duration-300 relative overflow-hidden`}>
                     <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/10 blur-[50px] rounded-full"></div>
+                    <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 blur-[60px] rounded-full group-hover:scale-150 transition-transform duration-700"></div>
                     
-                    <div className="relative mb-6 sm:mb-10 transform transition-all duration-300 group-hover:scale-110">
-                       <theme.icon className="w-14 h-14 sm:w-24 sm:h-24 stroke-[1.5]" />
+                    <div className="relative mb-6 sm:mb-10 transform transition-all duration-500 group-hover:scale-110 group-hover:rotate-3">
+                       <div className="w-20 h-20 sm:w-32 sm:h-32 bg-white/20 backdrop-blur-md rounded-[2.5rem] flex items-center justify-center shadow-inner">
+                         <theme.icon className="w-10 h-10 sm:w-16 sm:h-16 stroke-[1.5]" />
+                       </div>
                     </div>
                     
-                    <h2 className="relative text-2xl sm:text-3xl font-black italic uppercase tracking-tighter mb-2">{c}</h2>
-                    <p className="relative text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Entrar no Módulo</p>
+                    <h2 className="relative text-2xl sm:text-3xl font-black italic uppercase tracking-tighter mb-2 text-center">{c}</h2>
+                    <p className="relative text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em] opacity-80">Entrar no Módulo</p>
                   </div>
                 </motion.button>
               );
@@ -724,7 +751,7 @@ export default function App() {
                        </div>
                        
                        <p className="px-4 py-2 text-[10px] font-black text-slate-300 uppercase tracking-widest">Trocar de Curso</p>
-                       {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map(c => (
+                       {(['Matemática', 'Biologia', 'Língua Portuguesa', 'Geografia'] as Course[]).map(c => (
                          <button 
                            key={c}
                            onClick={() => handleCourseSwitch(c)}
@@ -845,7 +872,7 @@ export default function App() {
                       className="overflow-hidden bg-slate-50 rounded-3xl mb-2"
                     >
                       <div className="p-2 space-y-1">
-                        {(['Matemática', 'Biologia', 'Língua Portuguesa'] as Course[]).map(c => (
+                        {(['Matemática', 'Biologia', 'Língua Portuguesa', 'Geografia'] as Course[]).map(c => (
                           <button 
                             key={c}
                             onClick={() => { handleCourseSwitch(c); setShowMobileSidebar(false); setShowMobileCourses(false); }}
@@ -1195,7 +1222,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
   return (
     <div className="space-y-8">
       <div className="grid gap-6 md:grid-cols-3">
-        <div className={`relative overflow-hidden ${theme.classes.bg} rounded-[2.5rem] p-10 text-white shadow-2xl ${theme.classes.shadow} md:col-span-2`}>
+        <div className={`relative overflow-hidden bg-gradient-to-br ${theme.classes.gradient} rounded-[2.5rem] p-10 text-white shadow-2xl ${theme.classes.shadow} md:col-span-2`}>
           <div className="absolute right-0 top-0 w-80 h-80 bg-white/10 blur-[100px] rounded-full translate-x-1/3 -translate-y-1/3"></div>
           <div className="relative z-10 flex flex-col h-full">
             <h2 className="text-4xl font-black mb-2 leading-none tracking-tight">Opa, {profile.name}! 👋</h2>
@@ -1225,7 +1252,8 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
                     />
                     <circle 
                       cx="32" cy="32" r="28" 
-                      className={`${theme.classes.primary === 'indigo' ? 'stroke-indigo-600' : theme.classes.primary === 'emerald' ? 'stroke-emerald-600' : 'stroke-violet-600'} fill-none transition-all duration-1000`} 
+                      className="fill-none transition-all duration-1000" 
+                      style={{ stroke: theme.hex }}
                       strokeWidth="6" 
                       strokeDasharray={175.9} 
                       strokeDashoffset={175.9 - (175.9 * (latestResult.score / latestResult.total))}
@@ -1262,7 +1290,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
                 <label className="text-sm font-black uppercase tracking-widest text-slate-400">Questões</label>
                 <div className="grid grid-cols-4 gap-3">
                   {[5, 10, 15, 20].map(c => (
-                    <button key={c} onClick={() => setSelectedCount(c)} className={`h-12 rounded-2xl font-black transition-all ${selectedCount === c ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} ring-2 ring-offset-2 ${theme.classes.primary === 'indigo' ? 'ring-indigo-600' : theme.classes.primary === 'emerald' ? 'ring-emerald-600' : 'ring-violet-600'}` : 'bg-slate-50 text-slate-500 hover:bg-slate-100 shadow-sm border border-slate-100'}`}>
+                    <button key={c} onClick={() => setSelectedCount(c)} className={`h-12 rounded-2xl font-black transition-all ${selectedCount === c ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} ring-2 ring-offset-2` : 'bg-slate-50 text-slate-500 hover:bg-slate-100 shadow-sm border border-slate-100'}`} style={selectedCount === c ? { ringColor: theme.hex } as any : {}}>
                       {c}
                     </button>
                   ))}
@@ -1299,7 +1327,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
                 <div className="flex flex-wrap gap-2">
                   <button 
                     onClick={() => setSelectedTopics([])} 
-                    className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.length === 0 ? `${theme.classes.bg} text-white border-none` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                    className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.length === 0 ? `bg-gradient-to-r ${theme.classes.gradient} text-white border-none shadow-lg` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
                   >
                     Todos
                   </button>
@@ -1316,7 +1344,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
                           }
                         });
                       }} 
-                      className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.includes(t) ? `${theme.classes.bg} text-white border-none` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                      className={`px-5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedTopics.includes(t) ? `bg-gradient-to-r ${theme.classes.gradient} text-white border-none shadow-md` : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
                     >
                       {t}
                     </button>
@@ -1327,9 +1355,9 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
               <button 
                 onClick={() => onStart(selectedCount, selectedTopics, filterMode)}
                 disabled={filteredQuestionsCount === 0}
-                className={`w-full h-16 ${filteredQuestionsCount === 0 ? 'bg-slate-200 cursor-not-allowed' : theme.classes.bg} text-white rounded-[1.5rem] font-black text-xl shadow-xl ${filteredQuestionsCount === 0 ? '' : theme.classes.shadow + ' ' + theme.classes.darkHover} active:scale-[0.98] transition-all flex items-center justify-center gap-2`}
+                className={`w-full h-16 ${filteredQuestionsCount === 0 ? 'bg-slate-200 cursor-not-allowed shadow-none' : `bg-gradient-to-r ${theme.classes.gradient}`} text-white rounded-[1.5rem] font-black text-xl shadow-xl ${filteredQuestionsCount === 0 ? '' : theme.classes.shadow + ' ' + theme.classes.darkHover} active:scale-[0.98] transition-all flex items-center justify-center gap-2`}
               >
-                <Play className="w-6 h-6 fill-white" /> {filteredQuestionsCount === 0 ? 'Sem questões' : 'Iniciar Agora'}
+                <Play className={`w-6 h-6 transition-transform ${filteredQuestionsCount > 0 ? 'group-hover:scale-125' : ''} ${filteredQuestionsCount === 0 ? 'fill-slate-400' : 'fill-white text-white'}`} /> {filteredQuestionsCount === 0 ? 'Sem questões' : 'Iniciar Agora'}
               </button>
            </Card>
         </div>
