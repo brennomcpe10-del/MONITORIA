@@ -1373,17 +1373,35 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+
+  const progressKey = `simulado_progresso_${profile?.email}_${normalizeCourseKey(activeCourse)}`;
 
   useEffect(() => {
     setImageError(false);
   }, [idx]);
 
-  useEffect(() => {
-    // Scroll to top on mount
+  const initializeQuiz = (resumeData?: any) => {
+    setLoading(true);
     window.scrollTo(0, 0);
-    
+
     setTimeout(() => {
       try {
+        if (resumeData) {
+          // Restore from saved data
+          const savedQuestions = resumeData.questionIds.map((id: string) => 
+            allQuestions.find((q: any) => q.id === id)
+          ).filter(Boolean);
+
+          if (savedQuestions.length > 0) {
+            setQuestions(savedQuestions);
+            setAns(resumeData.ans);
+            setIdx(resumeData.idx);
+            setLoading(false);
+            return;
+          }
+        }
+
         // Validação de Dados: Garante que apenas questões completas sejam carregadas
         const validated = allQuestions.filter((q: any) => {
           const text = q.text || q.pergunta;
@@ -1436,7 +1454,81 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
         onFinish(null);
       }
     }, 800);
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem(progressKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Basic validation and checking if it's the same matter is done via progressKey
+        setShowResumeModal(true);
+      } catch (e) {
+        initializeQuiz();
+      }
+    } else {
+      initializeQuiz();
+    }
   }, []);
+
+  // Save progress on changes
+  useEffect(() => {
+    if (!loading && !finished && questions.length > 0) {
+      const prog = {
+        questionIds: questions.map(q => q.id),
+        ans,
+        idx,
+        course: activeCourse
+      };
+      localStorage.setItem(progressKey, JSON.stringify(prog));
+    }
+  }, [ans, idx, questions, loading, finished]);
+
+  const handleResume = () => {
+    const saved = localStorage.getItem(progressKey);
+    if (saved) {
+      initializeQuiz(JSON.parse(saved));
+    }
+    setShowResumeModal(false);
+  };
+
+  const handleStartNew = () => {
+    localStorage.removeItem(progressKey);
+    setShowResumeModal(false);
+    initializeQuiz();
+  };
+
+  if (showResumeModal) {
+    return (
+      <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }} 
+          animate={{ scale: 1, opacity: 1 }} 
+          className="bg-white rounded-[2.5rem] w-full max-w-md p-10 text-center shadow-2xl"
+        >
+          <div className={`w-20 h-20 ${theme.classes.lightBg} ${theme.classes.text} rounded-full flex items-center justify-center mx-auto mb-6`}>
+            <History className="w-10 h-10" />
+          </div>
+          <h3 className="text-2xl font-black text-slate-800 mb-2">Simulado em Aberto</h3>
+          <p className="text-slate-500 font-medium mb-8">Você possui um simulado de {activeCourse} em andamento. Deseja continuar de onde parou ou começar um novo?</p>
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={handleResume}
+              className={`w-full h-16 ${theme.classes.bg} text-white rounded-2xl font-black text-lg shadow-xl ${theme.classes.shadow} hover:scale-[1.02] transition-all flex items-center justify-center gap-2`}
+            >
+              Continuar Simulado
+            </button>
+            <button 
+              onClick={handleStartNew}
+              className="w-full h-14 bg-slate-100 text-slate-500 rounded-2xl font-black hover:bg-slate-200 transition-all"
+            >
+              Começar Novo
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (loading) return <div className="flex flex-col items-center justify-center py-40 animate-pulse"><Loader2 className={`w-12 h-12 animate-spin ${theme.classes.text} mb-4`} /><p className="font-black text-slate-400 uppercase tracking-widest text-[10px]">Embaralhando questões...</p></div>;
 
@@ -1461,6 +1553,9 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
       }, {} as any),
       missedQuestionIds: questions.filter((_, i) => ans[i] !== questions[i].correctIndex).map(q => q.id)
     };
+
+    // Clean progress on finish
+    localStorage.removeItem(progressKey);
 
     return (
       <div className="max-w-3xl mx-auto space-y-10 animate-in fade-in zoom-in-95 duration-500">
@@ -1560,7 +1655,7 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
            </div>
            <div className="flex items-center gap-4 text-slate-400 font-bold text-xs uppercase tracking-widest">
              <div className="flex items-center gap-2"><Timer className="w-4 h-4" /> 00:00</div>
-             <button onClick={() => { if(confirm('Deseja mesmo sair?')) onFinish(null); }} className="hover:text-rose-500">Sair</button>
+             <button onClick={() => { if(confirm('Deseja mesmo sair? Ao sair, seu progresso continuará salvo para quando você voltar.')) onFinish(null); }} className="hover:text-rose-500 transition-colors">Sair</button>
            </div>
          </div>
          <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
