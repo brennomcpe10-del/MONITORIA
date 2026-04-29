@@ -323,7 +323,7 @@ export default function App() {
   const [videos, setVideos] = useState<VideoClass[]>([]);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
-  const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[] } | null>(null);
+  const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas' } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [targetCourse, setTargetCourse] = useState<Course | null>(null);
@@ -912,7 +912,7 @@ export default function App() {
             {currentView === 'dashboard' && (
               <Dashboard 
                 results={userResults} 
-                onStart={(c, t) => { setQuizConfig({count:c, topics:t}); setCurrentView('quiz'); }} 
+                onStart={(c, t, f) => { setQuizConfig({count:c, topics:t, filter:f}); setCurrentView('quiz'); }} 
                 questions={questions} 
                 profile={profile!} 
                 activeCourse={activeCourse} 
@@ -922,6 +922,7 @@ export default function App() {
               <QuizView 
                 config={quizConfig} 
                 allQuestions={questions} 
+                results={userResults}
                 profile={profile}
                 activeCourse={activeCourse}
                 isSyncing={isFinishing}
@@ -1140,14 +1141,42 @@ function VideosView({ videos, activeCourse, profile }: { videos: VideoClass[], a
   );
 }
 
-function Dashboard({ results, onStart, questions, profile, activeCourse }: { results: QuizResult[], onStart: (count: number, topics: string[]) => void, questions: Question[], profile: UserProfile, activeCourse: Course }) {
+function Dashboard({ results, onStart, questions, profile, activeCourse }: { results: QuizResult[], onStart: (count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas') => void, questions: Question[], profile: UserProfile, activeCourse: Course }) {
   const [selectedCount, setSelectedCount] = useState(10);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]); // Empty = Todos
+  const [filterMode, setFilterMode] = useState<'Todas' | 'Não Respondidas' | 'Respondidas'>('Todas');
   
   if (!profile) return null;
 
   const theme = COURSE_THEMES[activeCourse];
   const isMonitor = verificarSeEhMonitor(profile, activeCourse);
+
+  // Identify questions that have been answered correctly at least once
+  const hitQuestionIds = useMemo(() => {
+    const hits = new Set<string>();
+    results.forEach(r => {
+      if (r.answers) {
+        r.answers.forEach(a => {
+          if (!r.missedQuestionIds.includes(a.questionId)) {
+            hits.add(a.questionId);
+          }
+        });
+      } else if (r.score > 0 && r.missedQuestionIds) {
+        // Fallback for results without 'answers' field if applicable
+        // This is tricky because we don't know which ones were correct
+      }
+    });
+    return hits;
+  }, [results]);
+
+  const filteredQuestionsCount = useMemo(() => {
+    return questions.filter(q => {
+      const isHit = hitQuestionIds.has(q.id);
+      if (filterMode === 'Não Respondidas') return !isHit;
+      if (filterMode === 'Respondidas') return isHit;
+      return true;
+    }).length;
+  }, [questions, filterMode, hitQuestionIds]);
   const topics = Array.from(new Set(questions.map((q: any) => q.topic)));
   
   const courseKey = normalizeCourseKey(activeCourse);
@@ -1241,6 +1270,31 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
               </div>
 
               <div className="space-y-4">
+                <label className="text-sm font-black uppercase tracking-widest text-slate-400">Filtrar Questões</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'Todas', label: 'Todas', color: 'slate' },
+                    { id: 'Não Respondidas', label: 'Não Respondidas (ou Erros)', color: 'blue' },
+                    { id: 'Respondidas', label: 'Apenas Acertos', color: 'emerald' }
+                  ].map(f => (
+                    <button 
+                      key={f.id}
+                      onClick={() => setFilterMode(f.id as any)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 ${filterMode === f.id ? (f.id === 'Não Respondidas' ? 'bg-blue-600 text-white border-none shadow-lg' : f.id === 'Respondidas' ? 'bg-emerald-600 text-white border-none shadow-lg' : 'bg-slate-800 text-white border-none shadow-lg') : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'}`}
+                    >
+                      {f.id === 'Não Respondidas' && <PlusCircle className="w-3 h-3" />}
+                      {f.id === 'Respondidas' && <CheckCircle2 className="w-3 h-3" />}
+                      {f.label}
+                      {filterMode === f.id && <span className="ml-1 opacity-60">({filteredQuestionsCount})</span>}
+                    </button>
+                  ))}
+                </div>
+                {filterMode === 'Não Respondidas' && (
+                  <p className="text-[10px] font-bold text-slate-400 italic">Mostrando questões que você nunca acertou.</p>
+                )}
+              </div>
+
+              <div className="space-y-4">
                 <label className="text-sm font-black uppercase tracking-widest text-slate-400">Assunto</label>
                 <div className="flex flex-wrap gap-2">
                   <button 
@@ -1271,10 +1325,11 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
               </div>
 
               <button 
-                onClick={() => onStart(selectedCount, selectedTopics)}
-                className={`w-full h-16 ${theme.classes.bg} text-white rounded-[1.5rem] font-black text-xl shadow-xl ${theme.classes.shadow} ${theme.classes.darkHover} active:scale-[0.98] transition-all flex items-center justify-center gap-2`}
+                onClick={() => onStart(selectedCount, selectedTopics, filterMode)}
+                disabled={filteredQuestionsCount === 0}
+                className={`w-full h-16 ${filteredQuestionsCount === 0 ? 'bg-slate-200 cursor-not-allowed' : theme.classes.bg} text-white rounded-[1.5rem] font-black text-xl shadow-xl ${filteredQuestionsCount === 0 ? '' : theme.classes.shadow + ' ' + theme.classes.darkHover} active:scale-[0.98] transition-all flex items-center justify-center gap-2`}
               >
-                <Play className="w-6 h-6 fill-white" /> Iniciar Agora
+                <Play className="w-6 h-6 fill-white" /> {filteredQuestionsCount === 0 ? 'Sem questões' : 'Iniciar Agora'}
               </button>
            </Card>
         </div>
@@ -1310,7 +1365,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
   );
 }
 
-function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCourse }: any) {
+function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCourse, results }: any) {
   const theme = COURSE_THEMES[activeCourse as Course];
   const [questions, setQuestions] = useState<Question[]>([]);
   const [idx, setIdx] = useState(0);
@@ -1338,21 +1393,40 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
         });
 
         // Filtro por assunto solicitado
-        const filtered = config.topics && config.topics.length > 0 
+        const filteredByTopic = config.topics && config.topics.length > 0 
           ? validated.filter((q: any) => config.topics.includes(q.topic) || config.topics.includes(q.assunto)) 
           : validated;
 
+        // Filtro por desempenho (hit history)
+        const hitQuestionIds = new Set<string>();
+        (results || []).forEach((r: any) => {
+          if (r.answers) {
+            r.answers.forEach((a: any) => {
+              if (r.missedQuestionIds && !r.missedQuestionIds.includes(a.questionId)) {
+                hitQuestionIds.add(a.questionId);
+              }
+            });
+          }
+        });
+
+        const finalFiltered = filteredByTopic.filter((q: any) => {
+          const isHit = hitQuestionIds.has(q.id);
+          if (config.filter === 'Não Respondidas') return !isHit;
+          if (config.filter === 'Respondidas') return isHit;
+          return true;
+        });
+
         // Verificação de Assunto: impede o início se não houver questões válidas
-        if (filtered.length === 0) {
-          toast.error(config.topics && config.topics.length > 0 
-            ? `Ops! Não encontramos questões válidas para os assuntos selecionados.` 
+        if (finalFiltered.length === 0) {
+          toast.error(config.filter !== 'Todas' 
+            ? `Ops! Não há questões que atendam aos filtros selecionados.` 
             : 'Erro: O banco de questões parece estar vazio ou inválido.');
           onFinish(null); // Retorna ao dashboard
           return;
         }
 
         // Embaralhamento e preparação final
-        const final = [...filtered].sort(() => Math.random() - 0.5).slice(0, config.count);
+        const final = [...finalFiltered].sort(() => Math.random() - 0.5).slice(0, config.count);
         setQuestions(final);
         setAns(new Array(final.length).fill(null));
         setLoading(false);
