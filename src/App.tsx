@@ -59,6 +59,7 @@ import {
   writeBatch,
   updateDoc
 } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // --- Firebase Config ---
 const firebaseConfig = {
@@ -73,6 +74,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // --- Themes ---
 const COURSE_THEMES: Record<Course, { primary: string, hex: string, icon: any, title: string, classes: any }> = {
@@ -1503,16 +1505,32 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
              </span>
            )}
          </div>
-         {(q.imageUrl || (q as any).imagemUrl || (q as any).imagem) && !imageError && (
-           <div className="mb-[15px] rounded-[8px] overflow-hidden border border-slate-100 shadow-sm flex justify-center bg-slate-50">
-             <img 
-               src={q.imageUrl || (q as any).imagemUrl || (q as any).imagem} 
-               alt="Contexto da questão" 
-               className="max-w-full h-auto rounded-[8px]" 
-               onError={() => setImageError(true)}
-             />
-           </div>
-         )}
+        {(q.imageUrl || (q as any).imagemUrl || (q as any).imagem) && (
+          <div className={`mb-8 rounded-3xl overflow-hidden border border-slate-100 shadow-sm flex flex-col items-center justify-center bg-slate-50 relative ${imageError ? 'py-4' : ''}`}>
+            {!imageError ? (
+              <img 
+                src={q.imageUrl || (q as any).imagemUrl || (q as any).imagem} 
+                alt="Contexto da questão" 
+                className="max-w-full h-auto rounded-[8px]" 
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <div className="flex items-center gap-3 px-6 py-2 bg-rose-50 text-rose-700 rounded-xl border border-rose-100 mx-6">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase tracking-tight">Imagem expirada ou indisponível</p>
+                  <p className="text-[9px] font-bold opacity-70">Por favor, reporte ao monitor para correção.</p>
+                </div>
+                <button 
+                  onClick={() => toast.info('Aviso enviado ao monitor!')}
+                  className="ml-auto bg-rose-600 text-white px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all"
+                >
+                  Reportar
+                </button>
+              </div>
+            )}
+          </div>
+        )}
          <h2 className="text-2xl md:text-3xl font-bold text-slate-800 leading-tight mb-12">{q.text}</h2>
          
          <div className="grid gap-3">
@@ -1577,6 +1595,9 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [bulkDeleteCode, setBulkDeleteCode] = useState('');
   const [userToApprove, setUserToApprove] = useState<any>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const handleCourseApproval = async (course: Course) => {
     if (!userToApprove) return;
@@ -1758,19 +1779,32 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
     return acc;
   }, {});
 
-  const handleAdd = async (e: FormEvent) => {
+  const handleSaveQuestion = async (e: FormEvent) => {
     e.preventDefault();
     if (!newQ.text || !newQ.topic || newQ.options.some(o => !o) || !newQ.explanation) return toast.error('Complete todos os campos!');
     
+    setIsUploading(true);
+    let finalImageUrl = newQ.imageUrl;
+
     try {
+      if (selectedFile) {
+        const fileRef = ref(storage, `questoes/${Date.now()}_${selectedFile.name}`);
+        const snapshot = await uploadBytes(fileRef, selectedFile);
+        finalImageUrl = await getDownloadURL(snapshot.ref);
+      }
+
       const id = editingId || Math.random().toString(36).substring(2, 11);
-      await setDoc(doc(db, 'questions', id), { ...newQ, id, course: activeCourse });
+      await setDoc(doc(db, 'questions', id), { ...newQ, imageUrl: finalImageUrl, id, course: activeCourse });
       toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
       setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+      setSelectedFile(null);
       setEditingId(null);
-      setActiveTab('list');
+      setShowEditModal(false);
+      if (!editingId) setActiveTab('list');
     } catch (e) {
       toast.error('Erro ao salvar questão.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -1781,10 +1815,10 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       options: [...q.options],
       correctIndex: q.correctIndex,
       explanation: q.explanation,
-      imageUrl: q.imageUrl || ''
+      imageUrl: q.imageUrl || (q as any).imagemUrl || (q as any).imagem || ''
     });
     setEditingId(q.id);
-    setActiveTab('add');
+    setShowEditModal(true);
   };
 
   const handleBulkImport = async () => {
@@ -2411,7 +2445,14 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                                        </button>
                                      </td>
                                      <td className="px-4 py-4">
-                                       <p className="text-sm font-bold text-slate-700 mb-1">{q.text}</p>
+                                       <div className="flex items-center gap-2 mb-1">
+                                         <p className="text-sm font-bold text-slate-700">{q.text}</p>
+                                         {(q.imageUrl?.includes('discord') || (q as any).imagemUrl?.includes('discord') || (q as any).imagem?.includes('discord')) && (
+                                           <div className="flex items-center gap-1 bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border border-rose-100 animate-pulse">
+                                             <AlertTriangle className="w-2.5 h-2.5" /> Discord Link
+                                           </div>
+                                         )}
+                                       </div>
                                        {q.explanation && (
                                          <p className="text-[10px] text-indigo-500 font-black uppercase tracking-widest flex items-center gap-1 italic">
                                            <Lightbulb className="w-3 h-3" /> Dica: {q.explanation.substring(0, 80)}{q.explanation.length > 80 ? '...' : ''}
@@ -2474,16 +2515,26 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
              <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
                <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
              </h3>
-             <form onSubmit={handleAdd} className="space-y-8">
+             <form onSubmit={handleSaveQuestion} className="space-y-8">
                <div className="grid md:grid-cols-2 gap-6">
                  <div className="space-y-2">
                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
                  </div>
                  <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL da Imagem (Opcional)</label>
-                   <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Link direto da imagem..." value={newQ.imageUrl} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Subir Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
+                   <div className="relative">
+                     <input type="file" accept="image/*" id="q-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                     <label htmlFor="q-upload" className={`w-full h-14 px-4 rounded-2xl bg-slate-50 border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
+                       <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Clique para selecionar'}</span>
+                       <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
+                     </label>
+                   </div>
                  </div>
+               </div>
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL da Imagem (Permanente)</label>
+                 <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Link direto (não user Discord)..." value={newQ.imageUrl} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
                </div>
                <div className="space-y-2">
                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Enunciado Completo</label>
@@ -2509,8 +2560,16 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                  <textarea rows={3} className="w-full p-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 text-sm italic" placeholder="Explique como resolver este problema..." value={newQ.explanation} onChange={e => setNewQ({...newQ, explanation: e.target.value})} />
                </div>
 
-               <button type="submit" className="w-full h-16 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all mt-6">
-                 {editingId ? 'Salvar Alterações' : 'Salvar Questão no Banco'}
+               <button 
+                 type="submit" 
+                 disabled={isUploading}
+                 className={`w-full h-16 rounded-2xl font-black text-xl shadow-xl transition-all mt-6 flex items-center justify-center gap-3 ${isUploading ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95'}`}
+               >
+                 {isUploading ? (
+                   <> <Loader2 className="w-6 h-6 animate-spin" /> Subindo Imagem...</>
+                 ) : (
+                   editingId ? 'Salvar Alterações' : 'Salvar Questão no Banco'
+                 )}
                </button>
              </form>
           </Card>
@@ -2682,6 +2741,105 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           </div>
         )}
       </AnimatePresence>
+
+      {/* Question Editor Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+           <motion.div 
+             initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+             animate={{ scale: 1, opacity: 1, y: 0 }} 
+             className="bg-white rounded-[2.5rem] w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl ring-1 ring-white/20"
+           >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white">
+                 <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
+                       <PlusSquare className="w-6 h-6" />
+                    </div>
+                    <div>
+                       <h3 className="text-xl font-black text-slate-800">Editar Questão</h3>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">ID: {editingId}</p>
+                    </div>
+                 </div>
+                 <button 
+                   onClick={() => { setShowEditModal(false); setEditingId(null); setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' }); }}
+                   className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-all"
+                 >
+                    <XCircle className="w-6 h-6 text-slate-400" />
+                 </button>
+              </div>
+
+              <div className="p-8 overflow-y-auto flex-1 bg-slate-50/50">
+                <form onSubmit={handleSaveQuestion} className="space-y-8">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
+                       <input className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Trocar Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
+                       <div className="relative">
+                         <input type="file" accept="image/*" id="q-edit-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                         <label htmlFor="q-edit-upload" className={`w-full h-14 px-4 rounded-2xl bg-white border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
+                           <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Substituir arquivo'}</span>
+                           <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
+                         </label>
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL Atual (Opcional)</label>
+                    <input className="w-full h-14 px-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold text-xs truncate" value={newQ.imageUrl || ''} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Enunciado</label>
+                    <textarea rows={4} className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold text-sm" value={newQ.text} onChange={e => setNewQ({...newQ, text: e.target.value})} />
+                  </div>
+
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Alternativas</label>
+                    {newQ.options.map((opt, i) => (
+                      <div key={i} className="flex gap-4 items-center group">
+                         <div className={`w-12 h-12 flex-shrink-0 rounded-2xl flex items-center justify-center font-black ${newQ.correctIndex === i ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-400 group-hover:bg-slate-200 group-hover:border-transparent transition-all'}`}>
+                           {String.fromCharCode(65 + i)}
+                         </div>
+                         <input className="flex-1 h-12 px-5 rounded-2xl bg-white border border-slate-200 focus:outline-none text-sm font-bold shadow-sm" value={opt} onChange={e => { const o=[...newQ.options]; o[i]=e.target.value; setNewQ({...newQ, options:o}); }} />
+                         <input type="radio" name="correct-edit" checked={newQ.correctIndex === i} onChange={() => setNewQ({...newQ, correctIndex: i})} className="w-6 h-6 accent-indigo-600" />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Explicação</label>
+                    <textarea rows={3} className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold text-sm italic" value={newQ.explanation} onChange={e => setNewQ({...newQ, explanation: e.target.value})} />
+                  </div>
+
+                  <div className="flex gap-4 pt-4 pb-8">
+                     <button 
+                       type="button" 
+                       onClick={() => setShowEditModal(false)}
+                       className="flex-1 h-16 bg-slate-100 text-slate-400 rounded-2xl font-black text-lg hover:bg-slate-200 transition-all"
+                     >
+                       Cancelar
+                     </button>
+                     <button 
+                       type="submit" 
+                       disabled={isUploading}
+                       className={`flex-[2] h-16 rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 transition-all flex items-center justify-center gap-3 ${isUploading ? 'bg-slate-200 text-slate-400' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                     >
+                       {isUploading ? (
+                         <> <Loader2 className="w-6 h-6 animate-spin" /> Salvando...</>
+                       ) : (
+                         'Salvar Alterações'
+                       )}
+                     </button>
+                  </div>
+                </form>
+              </div>
+           </motion.div>
+        </div>
+      )}
     </div>
   );
 }

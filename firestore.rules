@@ -58,25 +58,24 @@ service cloud.firestore {
     }
 
     function isValidQuestion(data) {
-      return data.text is string && data.text.size() <= 2000
-        && data.topic is string && data.topic.size() <= 100
-        && data.options is list && data.options.size() >= 2 && data.options.size() <= 6
+      return data.text is string && data.text.size() <= 3000
+        && data.topic is string && data.topic.size() <= 200
+        && data.options is list && data.options.size() >= 2 && data.options.size() <= 10
         && data.correctIndex is int && data.correctIndex >= 0 && data.correctIndex < data.options.size()
-        && data.explanation is string && data.explanation.size() <= 2000;
+        && data.explanation is string && data.explanation.size() <= 5000
+        && (data.imageUrl == "" || (data.imageUrl is string && data.imageUrl.size() <= 1000));
     }
 
-    match /quiz_results/{resultId} {
-      allow get: if isSignedIn() && (isOwner(resource.data.userId) || isMonitor());
-      allow list: if isSignedIn() && (
-        (request.query.limit <= 50 && resource.data.userId == request.auth.uid) 
-        || isMonitor()
-      );
-      
-      allow create: if isSignedIn() 
-        && isOwner(request.resource.data.userId)
-        && isValidResult(request.resource.data);
-        
-      allow update, delete: if false; // Results are immutable
+    match /results/{resultId} {
+      allow get: if isSignedIn() && (resource.data.userEmail == request.auth.token.email || isMonitor());
+      allow list: if isSignedIn() && (resource.data.userEmail == request.auth.token.email || isMonitor());
+      allow create: if isSignedIn() && request.resource.data.userEmail == request.auth.token.email;
+      allow update, delete: if false;
+    }
+
+    match /videos/{videoId} {
+      allow read: if isSignedIn();
+      allow write: if isMonitor();
     }
 
     function isValidResult(data) {

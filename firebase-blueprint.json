@@ -8,13 +8,14 @@
         "name": { "type": "string" },
         "email": { "type": "string" },
         "role": { "type": "string", "enum": ["student", "monitor"] },
-        "lastMissedQuestionIds": { "type": "array", "description": "IDs of questions missed in the most recent attempt" }
+        "approved": { "type": "boolean" },
+        "permissions": { "type": "object" }
       },
       "required": ["name", "email", "role"]
     },
     "Question": {
       "title": "Question",
-      "description": "Mathematics question",
+      "description": "Study question",
       "type": "object",
       "properties": {
         "text": { "type": "string" },
@@ -22,35 +23,35 @@
         "options": { "type": "array" },
         "correctIndex": { "type": "number" },
         "explanation": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "createdBy": { "type": "string" }
+        "imageUrl": { "type": "string" },
+        "course": { "type": "string" }
       },
-      "required": ["text", "topic", "options", "correctIndex", "explanation"]
+      "required": ["text", "topic", "options", "correctIndex", "explanation", "course"]
     },
     "QuizResult": {
       "title": "QuizResult",
       "description": "Record of a completed quiz attempt",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
         "date": { "type": "string", "format": "date-time" },
         "total": { "type": "number" },
         "score": { "type": "number" },
-        "topicStats": { 
-          "type": "object", 
-          "description": "Map of topic to { total, errors }"
-        },
-        "missedQuestionIds": { "type": "array" }
+        "missedQuestionIds": { "type": "array" },
+        "course": { "type": "string" }
       },
-      "required": ["userId", "date", "total", "score", "topicStats"]
+      "required": ["userEmail", "date", "total", "score"]
     },
-    "ClassStats": {
-      "title": "ClassStats",
-      "description": "Aggregated statistics for the monitor",
+    "VideoClass": {
+      "title": "VideoClass",
+      "description": "Video lesson",
       "type": "object",
       "properties": {
-        "mostMissedQuestionIds": { "type": "object", "description": "QuestionId -> MissCount" },
-        "topicErrorRates": { "type": "object", "description": "Topic -> ErrorRate" }
+        "title": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "course": { "type": "string" },
+        "date": { "type": "string" }
       }
     }
   },
@@ -63,9 +64,13 @@
       "schema": "Question",
       "description": "Question bank"
     },
-    "quiz_results/{resultId}": {
+    "results/{resultId}": {
       "schema": "QuizResult",
       "description": "Historical quiz attempts"
+    },
+    "videos/{videoId}": {
+      "schema": "VideoClass",
+      "description": "Video lessons library"
     }
   }
 }
