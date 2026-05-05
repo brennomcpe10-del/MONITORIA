@@ -32,6 +32,9 @@ import {
   Target,
   Timer,
   Youtube,
+  UserCircle,
+  MapPin,
+  X,
   ExternalLink,
   Menu,
   ShieldCheck,
@@ -179,6 +182,8 @@ interface UserProfile {
   role: Role;
   approved: boolean;
   materia?: Course;
+  grade?: string; // e.g., '1º Ano', '2º Ano', '3º Ano'
+  room?: string;  // e.g., 'A', 'B', 'C'
   permissions?: Record<string, 'monitor' | 'estudante'>;
   // Progress (Per Course)
   courses?: Record<string, CourseProgress>;
@@ -203,6 +208,8 @@ interface UserSummary {
   role: Role;
   approved: boolean;
   materia?: Course;
+  grade?: string;
+  room?: string;
   permissions?: Record<string, 'monitor' | 'estudante'>;
   missedTopics?: string[];
   totalSimulated?: number;
@@ -219,6 +226,10 @@ interface Question {
   correctIndex: number;
   explanation: string;
   imageUrl?: string;
+  room?: string;
+  grade?: string;
+  public?: boolean;
+  authorEmail?: string;
 }
 
 interface VideoClass {
@@ -235,6 +246,8 @@ interface QuizResult {
   total: number;
   score: number;
   course?: string;
+  room?: string;
+  grade?: string;
   answers: { questionId: string, selectedIndex: number }[];
   topicStats: {
     [topic: string]: {
@@ -324,7 +337,9 @@ export default function App() {
     return localStorage.getItem('mm_session_email');
   });
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loginData, setLoginData] = useState({ name: '', email: '' });
+  const [loginData, setLoginData] = useState({ name: '', email: '', grade: '3º Ano', room: 'C' });
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [showRoomSwitcher, setShowRoomSwitcher] = useState(false);
 
   // --- App State ---
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
@@ -348,6 +363,7 @@ export default function App() {
   }, [currentView, activeCourse, profile]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [videos, setVideos] = useState<VideoClass[]>([]);
+  const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
   const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas' } | null>(null);
@@ -377,6 +393,17 @@ export default function App() {
     }, 1200);
   };
 
+  // 0. Cache Cleanup on Context Change (Dashboard Reactivity)
+  useEffect(() => {
+    if (profile?.room || profile?.grade || activeCourse) {
+      setUserResults([]);
+      setSystemResults([]);
+      setAllUsers([]);
+      setQuestions([]);
+      setVideos([]);
+    }
+  }, [profile?.room, profile?.grade, activeCourse]);
+
   // 1. Sync Profile in real-time
   useEffect(() => {
     if (!sessionEmail) {
@@ -401,58 +428,69 @@ export default function App() {
     return () => unsub();
   }, [sessionEmail]);
 
-  // 2. Sync Questions in real-time (filtered by course)
+  // 2. Sync Questions in real-time (filtered by course and room)
   useEffect(() => {
+    if (!profile) return;
+    
     const unsub = onSnapshot(collection(db, 'questions'), (snap) => {
       const qData = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as Question))
         .filter(q => {
-          // Se não houver campo 'course' ou 'curso', trata como 'Matemática'
           const course = q.course || (q as any).curso || 'Matemática';
+          const isSameCourse = course === activeCourse;
+          const isSameRoom = q.room === profile.room;
+          const isSameGrade = q.grade === profile.grade;
           
-          // Se estamos em Matemática, aceitamos questões sem curso
-          if (activeCourse === 'Matemática' && (!q.course && !(q as any).curso)) {
-            // Correção Automática Opcional: Salvar cursoAtivo se não existir
-            updateDoc(doc(db, 'questions', q.id), { course: 'Matemática' }).catch(() => {});
-            return true;
-          }
-
-          return course === activeCourse;
+          return isSameCourse && isSameRoom && isSameGrade;
         });
       setQuestions(qData);
     });
     return () => unsub();
-  }, [activeCourse]);
+  }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 2.5 Sync Videos (filtered by course)
+  // 2.5 Sync Videos (filtered by course and room)
   useEffect(() => {
+    if (!profile) return;
+
     const unsubVideos = onSnapshot(collection(db, 'videos'), (snap) => {
       const vData = snap.docs
-        .map(d => ({ ...d.data(), id: d.id } as VideoClass))
+        .map(d => ({ ...d.data(), id: d.id } as any))
         .filter(v => {
           const course = v.course || 'Matemática';
-          return course === activeCourse;
+          const isSameCourse = course === activeCourse;
+          const isSameRoom = v.room === profile.room;
+          const isSameGrade = v.grade === profile.grade;
+          return isSameCourse && (isSameRoom || !v.room) && (isSameGrade || !v.grade);
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setVideos(vData);
     });
     return () => unsubVideos();
-  }, [activeCourse]);
+  }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 3. Sync All Users (for Monitor View)
+  // 3. Sync All Users (for Monitor View - Isolated by room/grade)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
       const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-        const uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
+        let uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
+        
+        // Se não for o brenno, filtra apenas pela sala do monitor logado
+        if (profile?.email !== 'brennomcpe10@gmail.com') {
+          uData = uData.filter(u => u.room === profile?.room && u.grade === profile?.grade);
+        }
+        
         setAllUsers(uData);
       });
       return () => unsub();
     }
   }, [profile, activeCourse]);
 
-  // 4. Sync Personal Results (filtered by course)
+  // 4. Sync Personal Results (filtered by course and room/grade)
   useEffect(() => {
-    if (profile) {
+    if (profile?.email) {
+      // Clear data immediately when room/grade/course changes to avoid data leaking briefly
+      setUserResults([]); 
+      
       const q = query(
         collection(db, 'results'), 
         where('userEmail', '==', profile.email),
@@ -462,28 +500,42 @@ export default function App() {
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs
           .map(d => ({ ...d.data(), id: d.id } as QuizResult))
-          .filter(r => (r.course || 'Matemática') === activeCourse);
+          .filter(r => {
+            const isSameCourse = (r.course || 'Matemática') === activeCourse;
+            const isSameRoom = r.room === profile?.room;
+            const isSameGrade = r.grade === profile?.grade;
+            return isSameCourse && isSameRoom && isSameGrade;
+          });
         setUserResults(rData);
       }, (error) => {
         console.error('Error fetching personal results:', error);
-        if (error.message?.includes('index')) {
-           toast.error('Erro de índice no Firebase. As estatísticas pessoais podem demorar a aparecer.');
-        }
       });
       return () => unsub();
     } else {
       setUserResults([]);
     }
-  }, [profile?.email, activeCourse]);
+  }, [profile?.email, profile?.room, profile?.grade, activeCourse]);
 
-  // 5. Sync All Results (System Dashboard for Monitors)
+  // 5. Sync All Results (System Dashboard for Monitors - Isolated by room/grade)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
+      setSystemResults([]); // Cleanup stale data
+
       const q = query(collection(db, 'results'), orderBy('date', 'desc'));
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs
           .map(d => ({ ...d.data(), id: d.id } as QuizResult))
-          .filter(r => (r.course || 'Matemática') === activeCourse);
+          .filter(r => {
+            const isSameCourse = (r.course || 'Matemática') === activeCourse;
+            const isSameRoom = r.room === profile?.room;
+            const isSameGrade = r.grade === profile?.grade;
+            
+            // Administrador supremo vê tudo o que pertence ao curso ativo
+            if (profile?.email === 'brennomcpe10@gmail.com') return isSameCourse;
+            
+            // Monitores normais veem apenas dados de sua própria sala e série
+            return isSameCourse && isSameRoom && isSameGrade;
+          });
         setSystemResults(rData);
       }, (error) => {
         console.error('Error fetching system results:', error);
@@ -492,7 +544,7 @@ export default function App() {
     } else {
       setSystemResults([]);
     }
-  }, [profile, activeCourse]);
+  }, [profile?.email, profile?.room, profile?.grade, activeCourse]);
 
   // Logout
   const handleLogout = () => {
@@ -500,6 +552,21 @@ export default function App() {
     setProfile(null);
     localStorage.removeItem('mm_session_email');
     setCurrentView('dashboard');
+  };
+
+  const handleRoomSwitch = async (newRoom: string, newGrade: string) => {
+    if (!profile) return;
+    try {
+      await updateDoc(doc(db, 'users', profile.email), {
+        room: newRoom,
+        grade: newGrade
+      });
+      toast.info(`Contexto alterado: ${newGrade} - ${newRoom}`);
+      // The onSnapshot(doc(db, 'users', ...)) will trigger profile update, 
+      // which will trigger all useEffects with [profile?.room, profile?.grade]
+    } catch (error) {
+      toast.error('Erro ao atualizar sala.');
+    }
   };
 
   // Login Logic
@@ -520,12 +587,22 @@ export default function App() {
           name: name,
           email: email,
           role: isAdmin ? 'monitor' : 'estudante',
+          grade: loginData.grade,
+          room: loginData.room,
           approved: isAdmin ? true : false,
           lastMissedQuestionIds: []
         };
         await setDoc(userRef, newProfile);
         toast.success(newProfile.approved ? 'Bem-vindo!' : 'Cadastro realizado! Aguarde aprovação.');
       } else {
+        // Update room/grade if they are missing
+        const existingData = userSnap.data() as UserProfile;
+        if (!existingData.room || !existingData.grade) {
+          await updateDoc(userRef, { 
+            room: loginData.room, 
+            grade: loginData.grade 
+          });
+        }
         // If admin logs in, ensure they are always monitor/approved even if data was manually changed
         if (isAdmin) {
           await setDoc(userRef, { role: 'monitor', approved: true }, { merge: true });
@@ -543,44 +620,132 @@ export default function App() {
 
   if (!profile) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 selection:bg-indigo-100">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-          <div className="rounded-[2.5rem] bg-white p-10 shadow-2xl shadow-slate-200 border border-slate-100">
-            <div className="flex flex-col items-center mb-10 text-center">
-              <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-600/30">
-                <Calculator className="w-8 h-8" />
-              </div>
-              <h1 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-2">Monitoria 3º Ano C</h1>
-              <p className="text-slate-400 font-medium">Sua jornada rumo ao conhecimento em todas as áreas.</p>
-            </div>
-
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">Seu Nome</label>
-                <input 
-                  className="w-full h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
-                  value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} placeholder="Ex: João Silva" 
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">E-mail</label>
-                <input 
-                  className="w-full h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
-                  value={loginData.email} onChange={e => setLoginData({...loginData, email: e.target.value})} placeholder="jose@escola.com" 
-                />
-              </div>
-              <button 
-                type="submit"
-                className="w-full h-14 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all mt-4"
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 selection:bg-indigo-100 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-indigo-50 via-slate-50 to-white overflow-hidden">
+        <AnimatePresence mode="wait">
+          {showWelcome ? (
+            <motion.div 
+              key="welcome"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
+              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+              className="text-center max-w-lg px-6"
+            >
+              <motion.div 
+                initial={{ rotate: -20, scale: 0 }}
+                animate={{ rotate: 12, scale: 1 }}
+                transition={{ delay: 0.2, type: 'spring' }}
+                className="w-32 h-32 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center mx-auto mb-12 shadow-[0_20px_50px_rgba(79,70,229,0.3)]"
               >
-                Entrar na Plataforma
-              </button>
-            </form>
-            <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Apenas Estudantes Autorizados</p>
-            </div>
-          </div>
-        </motion.div>
+                 <GraduationCap className="w-16 h-16 text-white -rotate-12" />
+              </motion.div>
+              <motion.h1 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="text-6xl font-black text-slate-900 mb-6 tracking-tighter leading-none"
+              >
+                Caminho do <span className="text-indigo-600">Aprendizado</span>
+              </motion.h1>
+              <motion.p 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                className="text-slate-500 font-bold text-xl mb-12 leading-relaxed max-w-md mx-auto"
+              >
+                Uma plataforma inteligente para transformar sua jornada acadêmica.
+              </motion.p>
+              <motion.button 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 }}
+                onClick={() => setShowWelcome(false)}
+                className="group relative px-12 py-6 bg-slate-900 text-white rounded-3xl font-black text-xl shadow-2xl hover:scale-105 active:scale-95 transition-all overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-indigo-600 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+                <span className="relative flex items-center gap-3">
+                  Entrar na Jornada <ArrowRight className="w-6 h-6" />
+                </span>
+              </motion.button>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="login"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="w-full max-w-md"
+            >
+              <div className="rounded-[3rem] bg-white p-12 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] border border-slate-100 flex flex-col items-center">
+                <div className="flex flex-col items-center mb-10 text-center w-full">
+                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 border border-slate-100">
+                    <UserCircle className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-3xl font-black tracking-tight text-slate-900 leading-none mb-2">Identificação</h2>
+                  <p className="text-slate-400 font-bold text-sm tracking-wide uppercase">Dados Escolares</p>
+                </div>
+
+                <form onSubmit={handleLogin} className="space-y-5 w-full">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Seu Nome</label>
+                    <input 
+                      required
+                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-bold placeholder:text-slate-300" 
+                      value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} placeholder="Ex: João Silva" 
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">E-mail</label>
+                    <input 
+                      required
+                      type="email"
+                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-bold placeholder:text-slate-300" 
+                      value={loginData.email} onChange={e => setLoginData({...loginData, email: e.target.value})} placeholder="seu@email.com" 
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Série</label>
+                      <select 
+                        className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-black" 
+                        value={loginData.grade} onChange={e => setLoginData({...loginData, grade: e.target.value})}
+                      >
+                        <option value="1º Ano">1º Ano</option>
+                        <option value="2º Ano">2º Ano</option>
+                        <option value="3º Ano">3º Ano</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Turma</label>
+                      <select 
+                        className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-black" 
+                        value={loginData.room} onChange={e => setLoginData({...loginData, room: e.target.value})}
+                      >
+                        {['A', 'B', 'C', 'D', 'E', 'F', 'EPT'].map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-indigo-50/50 rounded-[2rem] border border-indigo-100 flex gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shrink-0 border border-indigo-100 shadow-sm">
+                      <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <p className="text-[10px] font-bold text-indigo-700/80 leading-relaxed uppercase tracking-tight">
+                      Suas informações são isoladas por turma para garantir privacidade e suporte personalizado.
+                    </p>
+                  </div>
+                  
+                  <button 
+                    type="submit"
+                    className="w-full h-16 bg-indigo-600 text-white rounded-[1.5rem] font-black text-lg shadow-2xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all mt-4"
+                  >
+                    Ativar Dashboard
+                  </button>
+                </form>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <Toaster richColors position="top-center" />
       </div>
     );
@@ -704,7 +869,7 @@ export default function App() {
               <theme.icon className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div className="block">
-              <h2 className="text-sm sm:text-xl font-black tracking-tighter leading-none mb-0.5 sm:mb-1">Monitoria <span className={theme.classes.text}>3º C</span></h2>
+              <h2 className="text-sm sm:text-xl font-black tracking-tighter leading-none mb-0.5 sm:mb-1">Monitoria <span className={theme.classes.text}>{profile.grade} {profile.room}</span></h2>
               <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${theme.classes.accText}`}>Módulo de {activeCourse}</p>
             </div>
           </div>
@@ -791,6 +956,22 @@ export default function App() {
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            {profile.email === 'brennomcpe10@gmail.com' && (
+              <button 
+                onClick={() => setShowRoomSwitcher(true)}
+                className="hidden lg:flex items-center gap-3 bg-white hover:bg-slate-50 border border-slate-100 px-5 py-2.5 rounded-2xl transition-all shadow-sm active:scale-95 group"
+              >
+                <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm shadow-indigo-100">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.1em] leading-none mb-1">Sala Atual</p>
+                  <p className="text-sm font-black text-slate-800 leading-none">{profile.grade} - {profile.room}</p>
+                </div>
+                <ChevronDown className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors ml-1" />
+              </button>
+            )}
+
             <div className="hidden sm:block text-right pr-4 border-r border-slate-100">
               <p className="text-sm font-black text-slate-800 leading-none">{profile.name.split(' ')[0]}</p>
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">
@@ -897,6 +1078,15 @@ export default function App() {
                 >
                   <Youtube className="w-6 h-6" /> Videoaulas
                 </button>
+                {profile.email === 'brennomcpe10@gmail.com' && (
+                  <button 
+                    onClick={() => { setShowRoomSwitcher(true); setShowMobileSidebar(false); }}
+                    className="w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black text-slate-500 hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100"
+                  >
+                    <MapPin className="w-6 h-6 text-indigo-500" /> Alterar Sala ({profile.room})
+                  </button>
+                )}
+
                 {verificarSeEhMonitor(profile, activeCourse) && (
                   <button 
                     onClick={() => { setCurrentView('monitor'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
@@ -965,7 +1155,9 @@ export default function App() {
                         ...res, 
                         userEmail: profile.email,
                         userName: profile.name,
-                        course: activeCourse
+                        course: activeCourse,
+                        room: profile.room,
+                        grade: profile.grade
                       };
                       await setDoc(doc(db, 'results', resId), resultData);
                       
@@ -1007,7 +1199,7 @@ export default function App() {
             )}
             {currentView === 'monitor' && (
               <MonitorView 
-                results={systemResults} 
+                results={profile.email === 'brennomcpe10@gmail.com' ? systemResults : systemResults.filter(r => r.room === profile.room && r.grade === profile.grade)} 
                 questions={questions} 
                 videos={videos}
                 allUsers={allUsers} 
@@ -1045,6 +1237,80 @@ export default function App() {
               <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-2">Carregando Módulos...</p>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Room Switcher Modal */}
+      <AnimatePresence>
+        {showRoomSwitcher && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowRoomSwitcher(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-10">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900 leading-none mb-2">Trocar Ambiente</h2>
+                    <p className="text-slate-500 font-bold">Selecione sua série e turma atual.</p>
+                  </div>
+                  <button onClick={() => setShowRoomSwitcher(false)} className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="space-y-8">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4 block px-1">Série / Ano</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {['1º Ano', '2º Ano', '3º Ano'].map(g => (
+                        <button 
+                          key={g}
+                          onClick={() => handleRoomSwitch(profile.room, g)}
+                          className={`py-6 rounded-2xl font-black transition-all border-2 ${profile.grade === g ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-50 border-slate-50 text-slate-400 hover:border-slate-200'}`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4 block px-1">Turma / Sala</label>
+                    <div className="grid grid-cols-4 gap-3">
+                      {['A', 'B', 'C', 'D', 'E', 'F', 'EPT'].map(r => (
+                        <button 
+                          key={r}
+                          onClick={() => handleRoomSwitch(r, profile.grade)}
+                          className={`py-5 rounded-2xl font-black transition-all border-2 ${profile.room === r ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'bg-slate-50 border-slate-50 text-slate-400 hover:border-slate-200'}`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-10 p-5 bg-amber-50 rounded-[2rem] border border-amber-100 flex gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shrink-0 border border-amber-100">
+                    <AlertCircle className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <p className="text-xs font-bold text-amber-700/80 leading-relaxed uppercase tracking-tight">
+                    Ao mudar de sala, seus dados de progresso e estatísticas serão filtrados para o novo ambiente.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -1593,6 +1859,10 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
       id: Math.random().toString(36).substring(2, 11),
       date: new Date().toISOString(),
       course: activeCourse,
+      room: profile?.room || 'C',
+      grade: profile?.grade || '3º Ano',
+      userEmail: profile?.email,
+      userName: profile?.name,
       total: questions.length,
       score,
       answers: questions.map((q, i) => ({ questionId: q.id, selectedIndex: ans[i] as number })),
@@ -1816,9 +2086,54 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
 
 function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin, profile }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean, profile: UserProfile }) {
   const theme = COURSE_THEMES[activeCourse];
-  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users'>('stats');
-  const [newQ, setNewQ] = useState({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse as Course });
+  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public'>('stats');
+  const [newQ, setNewQ] = useState({ 
+    text: '', 
+    topic: '', 
+    options: ['', '', '', ''], 
+    correctIndex: 0, 
+    explanation: '', 
+    imageUrl: '', 
+    course: activeCourse as Course,
+    isPublic: false 
+  });
+  const [publicQuestions, setPublicQuestions] = useState<Question[]>([]);
   const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
+
+  useEffect(() => {
+    if (verificarSeEhMonitor(profile, activeCourse)) {
+      const unsub = onSnapshot(query(collection(db, 'questions'), where('public', '==', true)), (snap) => {
+        const qData = snap.docs.map(d => ({ ...d.data(), id: d.id } as Question));
+        setPublicQuestions(qData.filter(q => q.course === activeCourse && (q.room !== profile.room || q.grade !== profile.grade)));
+      });
+      return () => unsub();
+    }
+  }, [profile, activeCourse]);
+
+  const filteredUsers = allUsers.filter(u => {
+    if (isAdmin) return true;
+    return u.room === profile.room && u.grade === profile.grade;
+  });
+
+  const handleImportQuestion = async (q: Question) => {
+    try {
+      const id = Math.random().toString(36).substring(2, 11);
+      const importedQ = {
+        ...q,
+        id,
+        room: profile.room,
+        grade: profile.grade,
+        public: false, // Imported questions are local by default
+        authorEmail: profile.email, // Now the monitor owns this copy
+        importedFrom: q.id
+      };
+      await setDoc(doc(db, 'questions', id), importedQ);
+      toast.success('Questão importada com sucesso para sua sala!');
+    } catch (e) {
+      toast.error('Erro ao importar questão.');
+    }
+  };
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [bulkJson, setBulkJson] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -2072,9 +2387,18 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       }
 
       const id = editingId || Math.random().toString(36).substring(2, 11);
-      await setDoc(doc(db, 'questions', id), { ...newQ, imageUrl: finalImageUrl, id, course: activeCourse });
+      await setDoc(doc(db, 'questions', id), { 
+        ...newQ, 
+        public: newQ.isPublic,
+        imageUrl: finalImageUrl, 
+        id, 
+        course: activeCourse,
+        room: profile.room,
+        grade: profile.grade,
+        authorEmail: profile.email
+      });
       toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
-      setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '' });
+      setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse, isPublic: false });
       setSelectedFile(null);
       setEditingId(null);
       setShowEditModal(false);
@@ -2094,7 +2418,8 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       correctIndex: q.correctIndex,
       explanation: q.explanation,
       imageUrl: q.imageUrl || (q as any).imagemUrl || (q as any).imagem || '',
-      course: (q.course || activeCourse) as Course
+      course: (q.course || activeCourse) as Course,
+      isPublic: q.public || false
     });
     setEditingId(q.id);
     setShowEditModal(true);
@@ -2158,6 +2483,8 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
         ...newVideo, 
         youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`, // Normalize
         id, 
+        room: profile.room,
+        grade: profile.grade,
         date: new Date().toISOString(), 
         course: activeCourse 
       });
@@ -2187,9 +2514,9 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
-           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users'] as const).map(t => (
+           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users', 'public'] as const).map(t => (
              <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-3.5 rounded-xl text-[10px] sm:text-xs font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
-               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : 'Usuários'}
+               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : t === 'users' ? 'Usuários' : 'Banco Público'}
              </button>
            ))}
            {!verificarSeEhMonitor(profile, activeCourse) && (
@@ -2202,7 +2529,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
         <div className="space-y-6">
            <div className="flex items-center justify-between">
              <h3 className="text-xl font-bold flex items-center gap-2">Gestão de Usuários</h3>
-             <Badge color="amber">Pendentes: {allUsers.filter((u:any) => !u.approved).length}</Badge>
+             <Badge color="amber">Pendentes: {filteredUsers.filter((u:any) => !u.approved).length}</Badge>
            </div>
            
            <Card className="border-none shadow-2xl p-0">
@@ -2210,7 +2537,7 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                 <table className="w-full text-left">
                   <thead>
                     <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                      <th className="px-8 py-6">Nome</th>
+                      <th className="px-8 py-6">Nome / Turma</th>
                       <th className="px-8 py-6">E-mail</th>
                       <th className="px-8 py-6 italic">Status do Usuário</th>
                       <th className="px-8 py-6">Simulados</th>
@@ -2218,14 +2545,17 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {allUsers.map((u: any) => (
+                    {filteredUsers.map((u: any) => (
                       <tr key={u.email} className="group hover:bg-slate-50/50 transition-colors">
                         <td className="px-8 py-6">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-xs">
                               {u.name.charAt(0)}
                             </div>
-                            <span className="font-bold text-slate-700">{u.name}</span>
+                            <div>
+                               <p className="font-bold text-slate-700">{u.name}</p>
+                               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{u.grade} - Sala {u.room}</p>
+                            </div>
                           </div>
                         </td>
                         <td className="px-8 py-6 text-sm text-slate-400 font-medium">{u.email}</td>
@@ -2531,18 +2861,18 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
              </div>
            )}
 
-           <div className="grid gap-6 md:grid-cols-3">
-             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
-               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados Totais</p>
-               <p className="text-4xl font-black text-indigo-600">{results.length}</p>
+           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Simulados</p>
+               <p className="text-3xl font-black text-indigo-600">{results.length}</p>
              </div>
-             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
-               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Banco Questões</p>
-               <p className="text-4xl font-black text-emerald-500">{questions.length}</p>
+             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Questões</p>
+               <p className="text-3xl font-black text-emerald-500">{questions.length}</p>
              </div>
-             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
-               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Aproveitamento Global</p>
-               <p className="text-4xl font-black text-amber-500">
+             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl flex flex-col items-center justify-center text-center">
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Aproveitamento</p>
+               <p className="text-3xl font-black text-amber-500">
                  {results.length > 0 ? (results.reduce((a:any,b:any)=>a+b.score,0)/results.reduce((a:any,b:any)=>a+b.total,0)*100).toFixed(0):0}%
                </p>
              </div>
@@ -2807,15 +3137,28 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
                  </div>
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Subir Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
-                   <div className="relative">
-                     <input type="file" accept="image/*" id="q-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
-                     <label htmlFor="q-upload" className={`w-full h-14 px-4 rounded-2xl bg-slate-50 border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
-                       <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Clique para selecionar'}</span>
-                       <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
-                     </label>
-                   </div>
+                 <div className="flex gap-4">
+                    <div className="flex-1 space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Subir Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
+                        <div className="relative">
+                            <input type="file" accept="image/*" id="q-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                            <label htmlFor="q-upload" className={`w-full h-14 px-4 rounded-2xl bg-slate-50 border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Clique para selecionar'}</span>
+                                <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
+                            </label>
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Visibilidade</label>
+                        <button 
+                            type="button"
+                            onClick={() => setNewQ({...newQ, isPublic: !newQ.isPublic})}
+                            className={`h-14 px-6 rounded-2xl border transition-all flex items-center gap-2 font-bold text-xs ${newQ.isPublic ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+                        >
+                            {newQ.isPublic ? <Globe className="w-4 h-4 animate-pulse" /> : <div className="w-4 h-4 rounded-full border-2 border-current"></div>}
+                            {newQ.isPublic ? 'Pública' : 'Privada'}
+                        </button>
+                    </div>
                  </div>
                </div>
                <div className="space-y-2">
@@ -2934,6 +3277,71 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
                </div>
              )}
           </Card>
+        </div>
+      )}
+
+      {activeTab === 'public' && (
+        <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+           <div className="flex items-center justify-between">
+              <div>
+                 <h3 className="text-2xl font-black text-slate-800">Banco Público de Questões</h3>
+                 <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Compartilhamento entre salas</p>
+              </div>
+              <Badge color="emerald">Disponíveis: {publicQuestions.length}</Badge>
+           </div>
+
+           {publicQuestions.length === 0 ? (
+             <Card className="p-20 text-center bg-slate-50 border-dashed border-2 border-slate-200">
+               <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center text-slate-400 mx-auto mb-4">
+                 <Globe className="w-8 h-8" />
+               </div>
+               <p className="text-slate-400 font-bold italic tracking-tight">Nenhuma questão pública encontrada para {activeCourse} no momento.</p>
+             </Card>
+           ) : (
+             <div className="grid gap-6">
+                {Object.entries(publicQuestions.reduce((acc: any, q) => {
+                  const topic = q.topic || 'Sem Categoria';
+                  if (!acc[topic]) acc[topic] = [];
+                  acc[topic].push(q);
+                  return acc;
+                }, {})).map(([topic, qs]: any) => (
+                  <div key={topic} className="space-y-4">
+                     <h4 className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-2">
+                        <Target className="w-3 h-3" /> {topic}
+                     </h4>
+                     <div className="grid gap-4">
+                        {qs.map((q: any) => (
+                          <div key={q.id} className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 overflow-hidden p-6 md:p-8 hover:shadow-2xl transition-all group">
+                             <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+                                <div className="flex-1 space-y-4">
+                                   <div className="flex items-center gap-2">
+                                      <Badge color="indigo">{q.grade || 'Geral'}</Badge>
+                                      <Badge color="orange">Sala {q.room || '?'}</Badge>
+                                      <span className="text-[10px] font-medium text-slate-300 ml-2 italic">Autor: {q.authorEmail?.split('@')[0]}</span>
+                                   </div>
+                                   <h5 className="font-bold text-slate-700 text-lg">{q.text}</h5>
+                                   <div className="flex flex-wrap gap-2">
+                                      {q.options.map((o: string, idx: number) => (
+                                        <div key={idx} className={`px-4 py-2 rounded-xl text-xs font-bold border ${idx === q.correctIndex ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                                          {o}
+                                        </div>
+                                      ))}
+                                   </div>
+                                </div>
+                                <button
+                                   onClick={() => handleImportQuestion(q)}
+                                   className="shrink-0 flex items-center gap-2 px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all"
+                                >
+                                   <PlusCircle className="w-4 h-4" /> Adicionar ao meu curso
+                                </button>
+                             </div>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+                ))}
+             </div>
+           )}
         </div>
       )}
 
