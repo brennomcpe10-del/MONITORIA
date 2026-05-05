@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, FormEvent } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, FormEvent } from 'react';
 import { 
   Calculator, 
   BookOpen,
@@ -393,16 +393,20 @@ export default function App() {
     }, 1200);
   };
 
-  // 0. Cache Cleanup on Context Change (Dashboard Reactivity)
+  // 0. Cache Cleanup and State Reset on Context Change
+  const resetData = useCallback(() => {
+    setUserResults([]);
+    setSystemResults([]);
+    setAllUsers([]);
+    setQuestions([]);
+    setVideos([]);
+  }, []);
+
   useEffect(() => {
     if (profile?.room || profile?.grade || activeCourse) {
-      setUserResults([]);
-      setSystemResults([]);
-      setAllUsers([]);
-      setQuestions([]);
-      setVideos([]);
+      resetData();
     }
-  }, [profile?.room, profile?.grade, activeCourse]);
+  }, [profile?.room, profile?.grade, activeCourse, resetData]);
 
   // 1. Sync Profile in real-time
   useEffect(() => {
@@ -428,39 +432,47 @@ export default function App() {
     return () => unsub();
   }, [sessionEmail]);
 
-  // 2. Sync Questions in real-time (filtered by course and room)
+  // 2. Sync Questions in real-time (Strict Isolation)
   useEffect(() => {
     if (!profile) return;
     
-    const unsub = onSnapshot(collection(db, 'questions'), (snap) => {
-      const qData = snap.docs
-        .map(d => ({ ...d.data(), id: d.id } as Question))
-        .filter(q => {
-          const course = q.course || (q as any).curso || 'Matemática';
-          const isSameCourse = course === activeCourse;
-          const isSameRoom = q.room === profile.room;
-          const isSameGrade = q.grade === profile.grade;
-          
-          return isSameCourse && isSameRoom && isSameGrade;
-        });
-      setQuestions(qData);
+    const q = query(
+      collection(db, 'questions'),
+      where('course', '==', activeCourse),
+      where('grade', '==', profile.grade),
+      where('room', '==', profile.room)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      setQuestions(snap.docs.map(d => ({ ...d.data(), id: d.id } as Question)));
+    }, (err) => {
+      console.error('Error sync questions:', err);
+      // Fallback if index missing
+      if (err.message.includes('index')) {
+        toast.warning('Sincronização de questões limitada (índice necessário).');
+      }
     });
+
     return () => unsub();
   }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 2.5 Sync Videos (filtered by course and room)
+  // 2.5 Sync Videos (filtered by course and context)
   useEffect(() => {
     if (!profile) return;
 
-    const unsubVideos = onSnapshot(collection(db, 'videos'), (snap) => {
+    const q = query(
+      collection(db, 'videos'),
+      where('course', '==', activeCourse)
+    );
+
+    const unsubVideos = onSnapshot(q, (snap) => {
       const vData = snap.docs
         .map(d => ({ ...d.data(), id: d.id } as any))
         .filter(v => {
-          const course = v.course || 'Matemática';
-          const isSameCourse = course === activeCourse;
           const isSameRoom = v.room === profile.room;
           const isSameGrade = v.grade === profile.grade;
-          return isSameCourse && (isSameRoom || !v.room) && (isSameGrade || !v.grade);
+          // Mostra vídeos do curso se forem da mesma sala/série ou se forem públicos (sem sala/série definida)
+          return (isSameRoom || !v.room) && (isSameGrade || !v.grade);
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setVideos(vData);
@@ -468,22 +480,29 @@ export default function App() {
     return () => unsubVideos();
   }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 3. Sync All Users (for Monitor View - Isolated by room/grade)
+  // 3. Sync All Users (Isolated by room/grade for Monitors)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
-      const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-        let uData = snap.docs.map(d => ({ ...d.data() } as UserSummary));
-        
-        // Se não for o brenno, filtra apenas pela sala do monitor logado
-        if (profile?.email !== 'brennomcpe10@gmail.com') {
-          uData = uData.filter(u => u.room === profile?.room && u.grade === profile?.grade);
-        }
-        
-        setAllUsers(uData);
+      let q;
+      if (profile?.email === 'brennomcpe10@gmail.com') {
+         // Administrador vê todos (ou você pode filtrar se quiser focar)
+         q = query(collection(db, 'users'));
+      } else {
+         q = query(
+           collection(db, 'users'),
+           where('grade', '==', profile?.grade),
+           where('room', '==', profile?.room)
+         );
+      }
+
+      const unsub = onSnapshot(q, (snap) => {
+        setAllUsers(snap.docs.map(d => ({ ...d.data() } as UserSummary)));
+      }, (err) => {
+        console.error('Error sync users:', err);
       });
       return () => unsub();
     }
-  }, [profile, activeCourse]);
+  }, [profile?.email, profile?.grade, profile?.room, activeCourse]);
 
   // 4. Sync Personal Results (filtered by course and room/grade)
   useEffect(() => {
@@ -2446,7 +2465,10 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
           correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : (typeof q.correta === 'number' ? q.correta : (typeof q.resposta === 'number' ? q.resposta : 0)),
           explanation: q.explanation || q.explicacao || q.correcao || '',
           imageUrl: q.imageUrl || '',
-          course: activeCourse
+          course: activeCourse,
+          room: profile.room,
+          grade: profile.grade,
+          authorEmail: profile.email
         };
         
         await setDoc(doc(db, 'questions', id), questionData);
