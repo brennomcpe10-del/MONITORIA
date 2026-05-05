@@ -372,6 +372,8 @@ export default function App() {
   const [targetCourse, setTargetCourse] = useState<Course | null>(null);
 
   const [isFinishing, setIsFinishing] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+  const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
 
   const handleCourseSwitch = (course: Course) => {
     if (course === activeCourse) {
@@ -400,6 +402,8 @@ export default function App() {
     setAllUsers([]);
     setQuestions([]);
     setVideos([]);
+    setSelectedStudent(null);
+    setStudentDetailedProfile(null);
   }, []);
 
   useEffect(() => {
@@ -480,20 +484,15 @@ export default function App() {
     return () => unsubVideos();
   }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 3. Sync All Users (Isolated by room/grade for Monitors)
+  // 3. Sync All Users (Strict Isolation for User Management)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
-      let q;
-      if (profile?.email === 'brennomcpe10@gmail.com') {
-         // Administrador vê todos (ou você pode filtrar se quiser focar)
-         q = query(collection(db, 'users'));
-      } else {
-         q = query(
-           collection(db, 'users'),
-           where('grade', '==', profile?.grade),
-           where('room', '==', profile?.room)
-         );
-      }
+      // Monitores e Admin agora seguem a sala ativa por padrão para isolamento estrito
+      const q = query(
+        collection(db, 'users'),
+        where('grade', '==', profile?.grade),
+        where('room', '==', profile?.room)
+      );
 
       const unsub = onSnapshot(q, (snap) => {
         setAllUsers(snap.docs.map(d => ({ ...d.data() } as UserSummary)));
@@ -510,6 +509,9 @@ export default function App() {
       // Clear data immediately when room/grade/course changes to avoid data leaking briefly
       setUserResults([]); 
       
+      // We only filter by userEmail and order by date. 
+      // If (userEmail, date) index is missing, we still might get an error, 
+      // but it's a simpler index than (grade, room, userEmail, date).
       const q = query(
         collection(db, 'results'), 
         where('userEmail', '==', profile.email),
@@ -540,7 +542,12 @@ export default function App() {
     if (verificarSeEhMonitor(profile, activeCourse)) {
       setSystemResults([]); // Cleanup stale data
 
-      const q = query(collection(db, 'results'), orderBy('date', 'desc'));
+      // Simplified query to avoid complex composite index (grade, room, date)
+      const q = query(
+        collection(db, 'results'), 
+        orderBy('date', 'desc')
+      );
+
       const unsub = onSnapshot(q, (snap) => {
         const rData = snap.docs
           .map(d => ({ ...d.data(), id: d.id } as QuizResult))
@@ -580,9 +587,9 @@ export default function App() {
         room: newRoom,
         grade: newGrade
       });
+      setSelectedStudent(null);
+      resetData();
       toast.info(`Contexto alterado: ${newGrade} - ${newRoom}`);
-      // The onSnapshot(doc(db, 'users', ...)) will trigger profile update, 
-      // which will trigger all useEffects with [profile?.room, profile?.grade]
     } catch (error) {
       toast.error('Erro ao atualizar sala.');
     }
@@ -1225,6 +1232,10 @@ export default function App() {
                 activeCourse={activeCourse}
                 isAdmin={profile.email === 'brennomcpe10@gmail.com'}
                 profile={profile}
+                selectedStudent={selectedStudent}
+                setSelectedStudent={setSelectedStudent}
+                studentDetailedProfile={studentDetailedProfile}
+                setStudentDetailedProfile={setStudentDetailedProfile}
               />
             )}
             {currentView === 'videos' && (
@@ -2103,9 +2114,35 @@ function QuizView({ config, allQuestions, onFinish, profile, isSyncing, activeCo
   );
 }
 
-function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdmin, profile }: { results: QuizResult[], questions: Question[], videos: VideoClass[], allUsers: UserSummary[], activeCourse: Course, isAdmin: boolean, profile: UserProfile }) {
+function MonitorView({ 
+  results, 
+  questions, 
+  videos, 
+  allUsers, 
+  activeCourse, 
+  isAdmin, 
+  profile,
+  selectedStudent,
+  setSelectedStudent,
+  studentDetailedProfile,
+  setStudentDetailedProfile
+}: { 
+  results: QuizResult[], 
+  questions: Question[], 
+  videos: VideoClass[], 
+  allUsers: UserSummary[], 
+  activeCourse: Course, 
+  isAdmin: boolean, 
+  profile: UserProfile,
+  selectedStudent: string | null,
+  setSelectedStudent: (val: string | null) => void,
+  studentDetailedProfile: any,
+  setStudentDetailedProfile: (val: any) => void
+}) {
   const theme = COURSE_THEMES[activeCourse];
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public'>('stats');
+  const [adminRoomFilter, setAdminRoomFilter] = useState<string>('Todas');
+  const [adminGradeFilter, setAdminGradeFilter] = useState<string>('Todas');
   const [newQ, setNewQ] = useState({ 
     text: '', 
     topic: '', 
@@ -2130,7 +2167,11 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
   }, [profile, activeCourse]);
 
   const filteredUsers = allUsers.filter(u => {
-    if (isAdmin) return true;
+    if (isAdmin) {
+      const roomMatch = adminRoomFilter === 'Todas' || u.room === adminRoomFilter;
+      const gradeMatch = adminGradeFilter === 'Todas' || u.grade === adminGradeFilter;
+      return roomMatch && gradeMatch;
+    }
     return u.room === profile.room && u.grade === profile.grade;
   });
 
@@ -2156,8 +2197,6 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
   const [editingId, setEditingId] = useState<string | null>(null);
   const [bulkJson, setBulkJson] = useState('');
   const [isImporting, setIsImporting] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
-  const [studentDetailedProfile, setStudentDetailedProfile] = useState<any>(null);
   const [showMissedByStudents, setShowMissedByStudents] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
@@ -2550,8 +2589,36 @@ function MonitorView({ results, questions, videos, allUsers, activeCourse, isAdm
       {activeTab === 'users' && (
         <div className="space-y-6">
            <div className="flex items-center justify-between">
-             <h3 className="text-xl font-bold flex items-center gap-2">Gestão de Usuários</h3>
-             <Badge color="amber">Pendentes: {filteredUsers.filter((u:any) => !u.approved).length}</Badge>
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 leading-none mb-2">Usuários e Monitores</h3>
+                <p className="text-slate-500 font-bold">Gerencie permissões e visualize o desempenho dos alunos.</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <Badge color="amber">Pendentes: {filteredUsers.filter((u:any) => !u.approved).length}</Badge>
+                {isAdmin && (
+                  <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl">
+                    <select 
+                      value={adminGradeFilter}
+                      onChange={(e) => setAdminGradeFilter(e.target.value)}
+                      className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest px-4 focus:ring-0 cursor-pointer"
+                    >
+                      <option value="Todas">Todas as Séries</option>
+                      <option value="1º Ano">1º Ano</option>
+                      <option value="2º Ano">2º Ano</option>
+                      <option value="3º Ano">3º Ano</option>
+                    </select>
+                    <div className="w-px h-4 bg-slate-200"></div>
+                    <select 
+                      value={adminRoomFilter}
+                      onChange={(e) => setAdminRoomFilter(e.target.value)}
+                      className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest px-4 focus:ring-0 cursor-pointer"
+                    >
+                      <option value="Todas">Todas as Salas</option>
+                      {['A', 'B', 'C', 'D', 'E', 'F', 'EPT'].map(r => <option key={r} value={r}>Sala {r}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
            </div>
            
            <Card className="border-none shadow-2xl p-0">
