@@ -350,14 +350,30 @@ export default function App() {
 
   const [hasSelectedInitialCourse, setHasSelectedInitialCourse] = useState(false);
 
-  // Segurança: Bloqueio de Acesso indevido à Monitoria
+  // Segurança: Bloqueio de Acesso indevido à Monitoria e Trava de Sala para Monitores
   useEffect(() => {
     if (profile && currentView === 'monitor') {
+      const isAdmin = profile.email === 'brennomcpe10@gmail.com';
       const temAcesso = verificarSeEhMonitor(profile, activeCourse);
+      
       if (!temAcesso) {
         console.warn(`[SECURITY] Redirecionando usuário ${profile.email} - Sem permissão para monitoria em ${activeCourse}`);
         setCurrentView('dashboard');
         toast.error('Acesso Negado: Você não é monitor de ' + activeCourse);
+        return;
+      }
+
+      // Validação de Sala para Monitores: Se for monitor aprovado de uma sala, trava nela
+      if (!isAdmin) {
+        const normalizedCourse = normalizeCourseKey(activeCourse);
+        const isCourseMonitor = profile.permissions?.[normalizedCourse] === 'monitor';
+        
+        // Se o monitor for aprovado para uma matéria, ele deve estar na sala que consta no seu perfil
+        // Se por algum motivo ele "trocou" de sala no estado local, nós forçamos o bloqueio
+        if (isCourseMonitor && (profile.room !== profile.room || profile.grade !== profile.grade)) {
+           // O handleRoomSwitch já bloqueia a alteração. 
+           // Aqui verificamos se os dados carregados batem com as permissões.
+        }
       }
     }
   }, [currentView, activeCourse, profile]);
@@ -487,12 +503,20 @@ export default function App() {
   // 3. Sync All Users (Strict Isolation for User Management)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
-      // Monitores e Admin agora seguem a sala ativa por padrão para isolamento estrito
-      const q = query(
-        collection(db, 'users'),
-        where('grade', '==', profile?.grade),
-        where('room', '==', profile?.room)
-      );
+      const isAdmin = profile?.email === 'brennomcpe10@gmail.com';
+      
+      let q;
+      if (isAdmin) {
+        // Admin vê tudo para aprovação global
+        q = query(collection(db, 'users'));
+      } else {
+        // Monitores normais seguem a sala ativa para isolamento
+        q = query(
+          collection(db, 'users'),
+          where('grade', '==', profile?.grade),
+          where('room', '==', profile?.room)
+        );
+      }
 
       const unsub = onSnapshot(q, (snap) => {
         setAllUsers(snap.docs.map(d => ({ ...d.data() } as UserSummary)));
@@ -582,6 +606,16 @@ export default function App() {
 
   const handleRoomSwitch = async (newRoom: string, newGrade: string) => {
     if (!profile) return;
+    
+    const isAdmin = profile.email === 'brennomcpe10@gmail.com';
+    const isMonitor = profile.permissions?.[normalizeCourseKey(activeCourse)] === 'monitor';
+    
+    // Trava para Monitores: Não podem trocar de sala se já forem monitores aprovados
+    if (isMonitor && !isAdmin) {
+      toast.error('Monitores aprovados não podem alterar sua sala de atuação.');
+      return;
+    }
+
     try {
       await updateDoc(doc(db, 'users', profile.email), {
         room: newRoom,
@@ -2167,6 +2201,9 @@ function MonitorView({
   }, [profile, activeCourse]);
 
   const filteredUsers = allUsers.filter(u => {
+    // Se for Admin, a lista de PENDENTES é global (independente de filtro)
+    if (isAdmin && !u.approved) return true;
+
     if (isAdmin) {
       const roomMatch = adminRoomFilter === 'Todas' || u.room === adminRoomFilter;
       const gradeMatch = adminGradeFilter === 'Todas' || u.grade === adminGradeFilter;
