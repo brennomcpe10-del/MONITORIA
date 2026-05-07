@@ -507,6 +507,8 @@ export default function App() {
       const monitorGrade = profile?.grade;
       const monitorRoom = profile?.room;
       
+      console.log(`[DEBUG] Usuário: ${profile?.email} | Monitor: ${!isAdmin} | Grade: ${monitorGrade} | Room: ${monitorRoom}`);
+
       let q;
       if (isAdmin) {
         // Admin vê tudo para aprovação global
@@ -2180,6 +2182,18 @@ function MonitorView({
   setStudentDetailedProfile: (val: any) => void
 }) {
   const theme = COURSE_THEMES[activeCourse];
+  
+  useEffect(() => {
+    if (verificarSeEhMonitor(profile, activeCourse) && profile?.email !== 'brennomcpe10@gmail.com') {
+      console.log('[DEBUG-MONITOR] Identificação dinâmica da sala:', {
+        email: profile?.email,
+        grade: profile?.grade,
+        room: profile?.room,
+        totalUsersInLocalState: allUsers.length
+      });
+    }
+  }, [profile, activeCourse, allUsers.length]);
+
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public'>('stats');
   const [adminRoomFilter, setAdminRoomFilter] = useState<string>('Todas');
   const [adminGradeFilter, setAdminGradeFilter] = useState<string>('Todas');
