@@ -454,78 +454,91 @@ export default function App() {
     return () => unsub();
   }, [sessionEmail]);
 
-  // 2. Sync Questions in real-time (Strict Isolation)
+  // Helper para migrar dados legados (sem sala/série) para o padrão 3C
+  const migrarDocumentoLegado = async (colecao: string, docId: string, data: any) => {
+    if (!data.room || !data.grade) {
+      try {
+        await updateDoc(doc(db, colecao, docId), {
+          room: data.room || 'C',
+          grade: data.grade || '3ª Série',
+        });
+        console.log(`[LEGACY SYNC] Documento ${docId} migrado para 3C em ${colecao}`);
+      } catch (err) {
+        console.error(`[LEGACY ERR] Falha ao migrar ${docId}:`, err);
+      }
+    }
+  };
+
+  // 2. Sync Questions in real-time (Strict Isolation + Legacy Support)
   useEffect(() => {
     if (!profile) return;
     
+    // Consulta por curso. Filtro de sala/série feito client-side para suportar legados sem índice complexo
     const q = query(
       collection(db, 'questions'),
-      where('course', '==', activeCourse),
-      where('grade', '==', profile.grade),
-      where('room', '==', profile.room)
+      where('course', '==', activeCourse)
     );
 
     const unsub = onSnapshot(q, (snap) => {
-      setQuestions(snap.docs.map(d => ({ ...d.data(), id: d.id } as Question)));
+      const qData = snap.docs
+        .map(d => {
+          const data = d.data();
+          // Auto-migração se o usuário for monitor/admin na 3C
+          if (!data.room && profile.room === 'C' && profile.grade === '3ª Série') {
+            migrarDocumentoLegado('questions', d.id, data);
+          }
+          return { ...data, id: d.id } as Question;
+        })
+        .filter(q => {
+          const isSameRoom = q.room === profile.room && q.grade === profile.grade;
+          const isLegacyFor3C = !q.room && profile.room === 'C' && profile.grade === '3ª Série';
+          return isSameRoom || isLegacyFor3C;
+        });
+
+      setQuestions(qData);
     }, (err) => {
       console.error('Error sync questions:', err);
-      // Fallback if index missing
-      if (err.message.includes('index')) {
-        toast.warning('Sincronização de questões limitada (índice necessário).');
-      }
     });
 
     return () => unsub();
   }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 2.5 Sync Videos (filtered by course and context)
+  // 2.5 Sync Videos (Strict Isolation + Legacy Support)
   useEffect(() => {
     if (!profile) return;
     
-    setVideos([]); // Reset before loading new data
+    setVideos([]); 
 
-    // STRICT ISOLATION: Query by grade and room to avoid cross-room data leakage
     const q = query(
       collection(db, 'videos'),
-      where('course', '==', activeCourse),
-      where('grade', '==', profile.grade),
-      where('room', '==', profile.room)
+      where('course', '==', activeCourse)
     );
 
     const unsubVideos = onSnapshot(q, (snap) => {
       const vData = snap.docs
-        .map(d => ({ ...d.data(), id: d.id } as VideoClass))
+        .map(d => {
+          const data = d.data();
+          if (!data.room && profile.room === 'C' && profile.grade === '3ª Série') {
+            migrarDocumentoLegado('videos', d.id, data);
+          }
+          return { ...data, id: d.id } as VideoClass;
+        })
+        .filter(v => {
+          const isSameRoom = v.room === profile.room && v.grade === profile.grade;
+          const isLegacyFor3C = !v.room && profile.room === 'C' && profile.grade === '3ª Série';
+          return isSameRoom || isLegacyFor3C;
+        })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
       setVideos(vData);
     }, (error) => {
       console.error('Error fetching videos:', error);
-      
-      // Fallback: If index is missing, we might need a simpler query or to alert the user
-      // However, for strict isolation, we should respect the room/grade filter.
-      if (error.message.includes('index')) {
-        toast.warning('Filtro de vídeos limitado (índice necessário).');
-        
-        // Simpler query as fallback if composite index is missing
-        const simpleQ = query(
-          collection(db, 'videos'),
-          where('course', '==', activeCourse)
-        );
-        
-        onSnapshot(simpleQ, (snap) => {
-          const vData = snap.docs
-            .map(d => ({ ...d.data(), id: d.id } as VideoClass))
-            .filter(v => v.grade === profile.grade && v.room === profile.room)
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setVideos(vData);
-        });
-      }
     });
     
     return () => unsubVideos();
   }, [activeCourse, profile?.room, profile?.grade]);
 
-  // 3. Sync All Users (Strict Isolation for User Management)
+  // 3. Sync All Users (Strict Isolation + Legacy Support)
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
       const isAdmin = profile?.email === 'brennomcpe10@gmail.com';
@@ -533,26 +546,29 @@ export default function App() {
       const monitorRoom = profile?.room;
       
       console.log(`[DEBUG] Usuário: ${profile?.email} | Monitor: ${!isAdmin} | Grade: ${monitorGrade} | Room: ${monitorRoom}`);
+      console.log(`[DEBUG-MONITOR] Identificando legados para migração...`);
 
-      let q;
-      if (isAdmin) {
-        // Admin vê tudo para aprovação global
-        q = query(collection(db, 'users'));
-      } else if (monitorGrade && monitorRoom) {
-        // Monitores normais seguem a sala vinculada ao seu perfil para isolamento
-        q = query(
-          collection(db, 'users'),
-          where('grade', '==', monitorGrade),
-          where('room', '==', monitorRoom)
-        );
-      } else {
-        // Se o monitor ainda não tem sala definida, limpamos a lista
-        setAllUsers([]);
-        return;
-      }
+      // Para suportar legados, buscamos todos e filtramos no client
+      const q = query(collection(db, 'users'));
 
       const unsub = onSnapshot(q, (snap) => {
-        setAllUsers(snap.docs.map(d => ({ ...d.data() } as UserSummary)));
+        const uData = snap.docs
+          .map(d => {
+            const data = d.data();
+            // Auto-migração de usuários sem sala para 3C
+            if (!data.room && monitorRoom === 'C' && monitorGrade === '3ª Série') {
+              migrarDocumentoLegado('users', d.id, data);
+            }
+            return { ...data } as UserSummary;
+          })
+          .filter(u => {
+            if (isAdmin) return true;
+            const isSameRoom = u.room === monitorRoom && u.grade === monitorGrade;
+            const isLegacyFor3C = !u.room && monitorRoom === 'C' && monitorGrade === '3ª Série';
+            return isSameRoom || isLegacyFor3C;
+          });
+
+        setAllUsers(uData);
       }, (err) => {
         console.error('Error sync users:', err);
       });
@@ -580,9 +596,12 @@ export default function App() {
           .map(d => ({ ...d.data(), id: d.id } as QuizResult))
           .filter(r => {
             const isSameCourse = (r.course || 'Matemática') === activeCourse;
-            const isSameRoom = r.room === profile?.room;
-            const isSameGrade = r.grade === profile?.grade;
-            return isSameCourse && isSameRoom && isSameGrade;
+            
+            // Legacy Support for results:
+            const isSameRoom = r.room === profile?.room && r.grade === profile?.grade;
+            const isLegacyFor3C = !r.room && profile?.room === 'C' && profile?.grade === '3ª Série';
+            
+            return isSameCourse && (isSameRoom || isLegacyFor3C);
           });
         setUserResults(rData);
       }, (error) => {
