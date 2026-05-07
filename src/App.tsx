@@ -238,6 +238,8 @@ interface VideoClass {
   youtubeUrl: string;
   course: string;
   date: string;
+  room?: string;
+  grade?: string;
 }
 
 interface QuizResult {
@@ -479,24 +481,47 @@ export default function App() {
   // 2.5 Sync Videos (filtered by course and context)
   useEffect(() => {
     if (!profile) return;
+    
+    setVideos([]); // Reset before loading new data
 
+    // STRICT ISOLATION: Query by grade and room to avoid cross-room data leakage
     const q = query(
       collection(db, 'videos'),
-      where('course', '==', activeCourse)
+      where('course', '==', activeCourse),
+      where('grade', '==', profile.grade),
+      where('room', '==', profile.room)
     );
 
     const unsubVideos = onSnapshot(q, (snap) => {
       const vData = snap.docs
-        .map(d => ({ ...d.data(), id: d.id } as any))
-        .filter(v => {
-          const isSameRoom = v.room === profile.room;
-          const isSameGrade = v.grade === profile.grade;
-          // Mostra vídeos do curso se forem da mesma sala/série ou se forem públicos (sem sala/série definida)
-          return (isSameRoom || !v.room) && (isSameGrade || !v.grade);
-        })
+        .map(d => ({ ...d.data(), id: d.id } as VideoClass))
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
       setVideos(vData);
+    }, (error) => {
+      console.error('Error fetching videos:', error);
+      
+      // Fallback: If index is missing, we might need a simpler query or to alert the user
+      // However, for strict isolation, we should respect the room/grade filter.
+      if (error.message.includes('index')) {
+        toast.warning('Filtro de vídeos limitado (índice necessário).');
+        
+        // Simpler query as fallback if composite index is missing
+        const simpleQ = query(
+          collection(db, 'videos'),
+          where('course', '==', activeCourse)
+        );
+        
+        onSnapshot(simpleQ, (snap) => {
+          const vData = snap.docs
+            .map(d => ({ ...d.data(), id: d.id } as VideoClass))
+            .filter(v => v.grade === profile.grade && v.room === profile.room)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setVideos(vData);
+        });
+      }
     });
+    
     return () => unsubVideos();
   }, [activeCourse, profile?.room, profile?.grade]);
 
