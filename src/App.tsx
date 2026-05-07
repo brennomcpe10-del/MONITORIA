@@ -460,7 +460,7 @@ export default function App() {
       try {
         await updateDoc(doc(db, colecao, docId), {
           room: data.room || 'C',
-          grade: data.grade || '3ª Série',
+          grade: data.grade || '3º Ano',
         });
         console.log(`[LEGACY SYNC] Documento ${docId} migrado para 3C em ${colecao}`);
       } catch (err) {
@@ -471,7 +471,12 @@ export default function App() {
 
   // 2. Sync Questions in real-time (Strict Isolation + Legacy Support)
   useEffect(() => {
-    if (!profile) return;
+    // Permitir busca se tivermos perfil OU dados do onboarding (loginData)
+    const activeEmail = profile?.email || loginData.email;
+    if (!activeEmail) return;
+
+    const userRoom = profile?.room || loginData.room;
+    const userGrade = profile?.grade || loginData.grade;
     
     // Consulta por curso. Filtro de sala/série feito client-side para suportar legados sem índice complexo
     const q = query(
@@ -484,14 +489,14 @@ export default function App() {
         .map(d => {
           const data = d.data();
           // Auto-migração se o usuário for monitor/admin na 3C
-          if (!data.room && profile.room === 'C' && profile.grade === '3ª Série') {
+          if (!data.room && userRoom === 'C' && userGrade === '3º Ano') {
             migrarDocumentoLegado('questions', d.id, data);
           }
           return { ...data, id: d.id } as Question;
         })
         .filter(q => {
-          const isSameRoom = q.room === profile.room && q.grade === profile.grade;
-          const isLegacyFor3C = !q.room && profile.room === 'C' && profile.grade === '3ª Série';
+          const isSameRoom = q.room === userRoom && q.grade === userGrade;
+          const isLegacyFor3C = !q.room && userRoom === 'C' && userGrade === '3º Ano';
           return isSameRoom || isLegacyFor3C;
         });
 
@@ -501,11 +506,15 @@ export default function App() {
     });
 
     return () => unsub();
-  }, [activeCourse, profile?.room, profile?.grade]);
+  }, [activeCourse, profile?.room, profile?.grade, loginData.room, loginData.grade, loginData.email]);
 
   // 2.5 Sync Videos (Strict Isolation + Legacy Support)
   useEffect(() => {
-    if (!profile) return;
+    const activeEmail = profile?.email || loginData.email;
+    if (!activeEmail) return;
+
+    const userRoom = profile?.room || loginData.room;
+    const userGrade = profile?.grade || loginData.grade;
     
     setVideos([]); 
 
@@ -518,14 +527,14 @@ export default function App() {
       const vData = snap.docs
         .map(d => {
           const data = d.data();
-          if (!data.room && profile.room === 'C' && profile.grade === '3ª Série') {
+          if (!data.room && userRoom === 'C' && userGrade === '3º Ano') {
             migrarDocumentoLegado('videos', d.id, data);
           }
           return { ...data, id: d.id } as VideoClass;
         })
         .filter(v => {
-          const isSameRoom = v.room === profile.room && v.grade === profile.grade;
-          const isLegacyFor3C = !v.room && profile.room === 'C' && profile.grade === '3ª Série';
+          const isSameRoom = v.room === userRoom && v.grade === userGrade;
+          const isLegacyFor3C = !v.room && userRoom === 'C' && userGrade === '3º Ano';
           return isSameRoom || isLegacyFor3C;
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -536,7 +545,7 @@ export default function App() {
     });
     
     return () => unsubVideos();
-  }, [activeCourse, profile?.room, profile?.grade]);
+  }, [activeCourse, profile?.room, profile?.grade, loginData.room, loginData.grade, loginData.email]);
 
   // 3. Sync All Users (Strict Isolation + Legacy Support)
   useEffect(() => {
@@ -556,7 +565,7 @@ export default function App() {
           .map(d => {
             const data = d.data();
             // Auto-migração de usuários sem sala para 3C
-            if (!data.room && monitorRoom === 'C' && monitorGrade === '3ª Série') {
+            if (!data.room && monitorRoom === 'C' && monitorGrade === '3º Ano') {
               migrarDocumentoLegado('users', d.id, data);
             }
             return { ...data } as UserSummary;
@@ -564,7 +573,7 @@ export default function App() {
           .filter(u => {
             if (isAdmin) return true;
             const isSameRoom = u.room === monitorRoom && u.grade === monitorGrade;
-            const isLegacyFor3C = !u.room && monitorRoom === 'C' && monitorGrade === '3ª Série';
+            const isLegacyFor3C = !u.room && monitorRoom === 'C' && monitorGrade === '3º Ano';
             return isSameRoom || isLegacyFor3C;
           });
 
@@ -599,7 +608,7 @@ export default function App() {
             
             // Legacy Support for results:
             const isSameRoom = r.room === profile?.room && r.grade === profile?.grade;
-            const isLegacyFor3C = !r.room && profile?.room === 'C' && profile?.grade === '3ª Série';
+            const isLegacyFor3C = !r.room && profile?.room === 'C' && profile?.grade === '3º Ano';
             
             return isSameCourse && (isSameRoom || isLegacyFor3C);
           });
@@ -2279,13 +2288,18 @@ function MonitorView({
   const handleImportQuestion = async (q: Question) => {
     try {
       const id = Math.random().toString(36).substring(2, 11);
+      const qRoom = profile?.room || 'C';
+      const qGrade = profile?.grade || '3º Ano';
+
+      console.log('Importando questão para a sala:', qRoom);
+
       const importedQ = {
         ...q,
         id,
-        room: profile.room,
-        grade: profile.grade,
+        room: qRoom,
+        grade: qGrade,
         public: false, // Imported questions are local by default
-        authorEmail: profile.email, // Now the monitor owns this copy
+        authorEmail: profile?.email || '', // Now the monitor owns this copy
         importedFrom: q.id
       };
       await setDoc(doc(db, 'questions', id), importedQ);
@@ -2546,15 +2560,21 @@ function MonitorView({
       }
 
       const id = editingId || Math.random().toString(36).substring(2, 11);
+      
+      const questionRoom = profile?.room || 'C';
+      const questionGrade = profile?.grade || '3º Ano';
+      
+      console.log('Salvando questão para a sala:', questionRoom, '| Série:', questionGrade);
+
       await setDoc(doc(db, 'questions', id), { 
         ...newQ, 
         public: newQ.isPublic,
         imageUrl: finalImageUrl, 
         id, 
         course: activeCourse,
-        room: profile.room,
-        grade: profile.grade,
-        authorEmail: profile.email
+        room: questionRoom,
+        grade: questionGrade,
+        authorEmail: profile?.email || ''
       });
       toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
       setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse, isPublic: false });
@@ -2597,6 +2617,9 @@ function MonitorView({
       for (const q of data) {
         // Map user provided keys to internal question record fields
         const id = q.id || Math.random().toString(36).substring(2, 11);
+        const qRoom = profile?.room || 'C';
+        const qGrade = profile?.grade || '3º Ano';
+
         const questionData = {
           id,
           text: q.text || q.pergunta || q.enunciado || '',
@@ -2606,9 +2629,9 @@ function MonitorView({
           explanation: q.explanation || q.explicacao || q.correcao || '',
           imageUrl: q.imageUrl || '',
           course: activeCourse,
-          room: profile.room,
-          grade: profile.grade,
-          authorEmail: profile.email
+          room: qRoom,
+          grade: qGrade,
+          authorEmail: profile?.email || ''
         };
         
         await setDoc(doc(db, 'questions', id), questionData);
@@ -2640,13 +2663,18 @@ function MonitorView({
 
     try {
       const id = Math.random().toString(36).substring(2, 11);
+      const vRoom = profile?.room || 'C';
+      const vGrade = profile?.grade || '3º Ano';
+
+      console.log('Salvando vídeo para a sala:', vRoom);
+
       // We save the extracted ID as the youtubeUrl or stick to full URL but ensure we only use ID for playing
       await setDoc(doc(db, 'videos', id), { 
         ...newVideo, 
         youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`, // Normalize
         id, 
-        room: profile.room,
-        grade: profile.grade,
+        room: vRoom,
+        grade: vGrade,
         date: new Date().toISOString(), 
         course: activeCourse 
       });
