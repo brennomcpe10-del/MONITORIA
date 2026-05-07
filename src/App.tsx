@@ -1331,6 +1331,7 @@ export default function App() {
                 setSelectedStudent={setSelectedStudent}
                 studentDetailedProfile={studentDetailedProfile}
                 setStudentDetailedProfile={setStudentDetailedProfile}
+                loginData={loginData}
               />
             )}
             {currentView === 'videos' && (
@@ -2220,7 +2221,8 @@ function MonitorView({
   selectedStudent,
   setSelectedStudent,
   studentDetailedProfile,
-  setStudentDetailedProfile
+  setStudentDetailedProfile,
+  loginData
 }: { 
   results: QuizResult[], 
   questions: Question[], 
@@ -2232,7 +2234,8 @@ function MonitorView({
   selectedStudent: string | null,
   setSelectedStudent: (val: string | null) => void,
   studentDetailedProfile: any,
-  setStudentDetailedProfile: (val: any) => void
+  setStudentDetailedProfile: (val: any) => void,
+  loginData: any
 }) {
   const theme = COURSE_THEMES[activeCourse];
   
@@ -2286,12 +2289,19 @@ function MonitorView({
   });
 
   const handleImportQuestion = async (q: Question) => {
+    // Validação de sala dinâmica para monitores
+    const qRoom = profile?.room || loginData.room;
+    const qGrade = profile?.grade || loginData.grade;
+
+    if (!qRoom || !qGrade) {
+      console.error('[ERRO CRÍTICO] Tentativa de importação sem identificação de sala/série.');
+      return toast.error('Não conseguimos identificar sua sala. Verifique seu perfil antes de importar.');
+    }
+
     try {
       const id = Math.random().toString(36).substring(2, 11);
-      const qRoom = profile?.room || 'C';
-      const qGrade = profile?.grade || '3º Ano';
-
-      console.log('Importando questão para a sala:', qRoom);
+      
+      console.log('Importando questão para a sala:', qRoom, '| Série:', qGrade);
 
       const importedQ = {
         ...q,
@@ -2299,7 +2309,7 @@ function MonitorView({
         room: qRoom,
         grade: qGrade,
         public: false, // Imported questions are local by default
-        authorEmail: profile?.email || '', // Now the monitor owns this copy
+        authorEmail: profile?.email || loginData.email || '', 
         importedFrom: q.id
       };
       await setDoc(doc(db, 'questions', id), importedQ);
@@ -2360,11 +2370,28 @@ function MonitorView({
   };
 
   const handleSeedQuestions = async () => {
-    if (confirm('Deseja popular o banco de dados com as 8 questões iniciais padrão?')) {
+    const qRoom = profile?.room || loginData.room;
+    const qGrade = profile?.grade || loginData.grade;
+
+    if (!qRoom || !qGrade) {
+      console.error('[SEED ERR] Tentativa de seed sem sala definida.');
+      return toast.error('Sua sala não foi identificada para o envio das questões iniciais.');
+    }
+
+    if (confirm('Deseja popular o banco de dados com as 8 questões iniciais padrão para sua sala?')) {
       try {
-        const promises = INITIAL_QUESTIONS.map(q => setDoc(doc(db, 'questions', q.id), q));
+        const promises = INITIAL_QUESTIONS.map(q => {
+          const newId = `${q.id}_${qRoom}_${qGrade.replace(/\s/g, '_')}`;
+          return setDoc(doc(db, 'questions', newId), { 
+            ...q, 
+            id: newId, 
+            room: qRoom, 
+            grade: qGrade,
+            authorEmail: 'sistema@monitoriamaster.com'
+          });
+        });
         await Promise.all(promises);
-        toast.success('Banco de dados populado!');
+        toast.success('Banco de dados populado para sua sala!');
       } catch (e) {
         toast.error('Erro ao popular banco.');
       }
@@ -2561,9 +2588,16 @@ function MonitorView({
 
       const id = editingId || Math.random().toString(36).substring(2, 11);
       
-      const questionRoom = profile?.room || 'C';
-      const questionGrade = profile?.grade || '3º Ano';
+      // Captura dinâmica da sala do monitor
+      const questionRoom = profile?.room || loginData.room;
+      const questionGrade = profile?.grade || loginData.grade;
       
+      if (!questionRoom || !questionGrade) {
+        console.error('[ERRO CRÍTICO] Monitor sem sala/série definida ao tentar salvar questão.');
+        setIsUploading(false);
+        return toast.error('Sua turma não foi identificada. Verifique seu perfil antes de salvar.');
+      }
+
       console.log('Salvando questão para a sala:', questionRoom, '| Série:', questionGrade);
 
       await setDoc(doc(db, 'questions', id), { 
@@ -2574,7 +2608,7 @@ function MonitorView({
         course: activeCourse,
         room: questionRoom,
         grade: questionGrade,
-        authorEmail: profile?.email || ''
+        authorEmail: profile?.email || loginData.email || ''
       });
       toast.success(editingId ? 'Questão atualizada!' : 'Questão cadastrada no banco!');
       setNewQ({ text: '', topic: '', options: ['', '', '', ''], correctIndex: 0, explanation: '', imageUrl: '', course: activeCourse, isPublic: false });
@@ -2614,12 +2648,18 @@ function MonitorView({
       setIsImporting(true);
       let count = 0;
       
+      const qRoom = profile?.room || loginData.room;
+      const qGrade = profile?.grade || loginData.grade;
+
+      if (!qRoom || !qGrade) {
+        console.error('[ERRO CRÍTICO] Monitor sem sala/série definida ao tentar importar em massa.');
+        return toast.error('Turma não identificada para importação.');
+      }
+
       for (const q of data) {
         // Map user provided keys to internal question record fields
         const id = q.id || Math.random().toString(36).substring(2, 11);
-        const qRoom = profile?.room || 'C';
-        const qGrade = profile?.grade || '3º Ano';
-
+        
         const questionData = {
           id,
           text: q.text || q.pergunta || q.enunciado || '',
@@ -2631,7 +2671,7 @@ function MonitorView({
           course: activeCourse,
           room: qRoom,
           grade: qGrade,
-          authorEmail: profile?.email || ''
+          authorEmail: profile?.email || loginData.email || ''
         };
         
         await setDoc(doc(db, 'questions', id), questionData);
@@ -3143,9 +3183,10 @@ function MonitorView({
 
                   return (
                     <div key={topic} className="border border-slate-100 rounded-3xl overflow-hidden bg-slate-50/30">
-                      <button 
+                      <div 
+                        role="button"
                         onClick={() => toggleTopic(topic)}
-                        className="w-full px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-all"
+                        className="w-full px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-all cursor-pointer"
                       >
                         <div className="flex items-center gap-4">
                            <div className={`w-3 h-3 rounded-full ${topicRate >= 50 ? 'bg-rose-500' : topicRate > 20 ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>
@@ -3161,7 +3202,7 @@ function MonitorView({
                              <ArrowRight className="w-4 h-4 text-indigo-400 rotate-90" />
                           </div>
                         </div>
-                      </button>
+                      </div>
                       
                       <AnimatePresence>
                         {isExpanded && (
@@ -3244,9 +3285,10 @@ function MonitorView({
                  const isExpanded = expandedTopics[`list_${topic}`];
                  return (
                    <div key={topic} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                     <button 
+                     <div 
+                       role="button"
                        onClick={() => toggleTopic(`list_${topic}`)}
-                       className="w-full px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-all text-left"
+                       className="w-full px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-all text-left cursor-pointer"
                      >
                        <div className="flex items-center gap-4 flex-1">
                          <button 
@@ -3267,7 +3309,7 @@ function MonitorView({
                        <div className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
                          <ArrowRight className="w-5 h-5 text-slate-300 rotate-90" />
                        </div>
-                     </button>
+                     </div>
                      
                      <AnimatePresence>
                        {isExpanded && (
