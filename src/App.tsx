@@ -504,18 +504,24 @@ export default function App() {
   useEffect(() => {
     if (verificarSeEhMonitor(profile, activeCourse)) {
       const isAdmin = profile?.email === 'brennomcpe10@gmail.com';
+      const monitorGrade = profile?.grade;
+      const monitorRoom = profile?.room;
       
       let q;
       if (isAdmin) {
         // Admin vê tudo para aprovação global
         q = query(collection(db, 'users'));
-      } else {
-        // Monitores normais seguem a sala ativa para isolamento
+      } else if (monitorGrade && monitorRoom) {
+        // Monitores normais seguem a sala vinculada ao seu perfil para isolamento
         q = query(
           collection(db, 'users'),
-          where('grade', '==', profile?.grade),
-          where('room', '==', profile?.room)
+          where('grade', '==', monitorGrade),
+          where('room', '==', monitorRoom)
         );
+      } else {
+        // Se o monitor ainda não tem sala definida, limpamos a lista
+        setAllUsers([]);
+        return;
       }
 
       const unsub = onSnapshot(q, (snap) => {
@@ -2765,8 +2771,20 @@ function MonitorView({
                     ))}
                   </tbody>
                 </table>
+                {filteredUsers.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 text-slate-300">
+                      <Users className="w-8 h-8" />
+                    </div>
+                    <h4 className="text-lg font-black text-slate-800 mb-1">Nenhum aluno cadastrado</h4>
+                    <p className="text-slate-400 font-bold text-xs max-w-xs mx-auto">
+                      Nenhum aluno cadastrado nesta turma ainda. 
+                      {verificarSeEhMonitor(profile, activeCourse) && !isAdmin && ` (Turma: ${profile?.grade} - Sala ${profile?.room})`}
+                    </p>
+                  </div>
+                )}
               </div>
-           </Card>
+            </Card>
         </div>
       )}
 
