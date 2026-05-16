@@ -41,7 +41,9 @@ import {
   ChevronDown,
   Zap,
   Globe,
-  FileText
+  FileText,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -223,7 +225,8 @@ interface SummaryMaterial {
   title: string;
   course: string;
   topic: string;
-  link: string;
+  content: string;
+  imageUrl?: string;
   room?: string;
   grade?: string;
   date: string;
@@ -397,6 +400,7 @@ export default function App() {
   const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [systemResults, setSystemResults] = useState<QuizResult[]>([]);
+  const [classResults, setClassResults] = useState<QuizResult[]>([]);
   const [quizConfig, setQuizConfig] = useState<{ count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas' } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -662,6 +666,33 @@ export default function App() {
       setUserResults([]);
     }
   }, [profile?.email, profile?.room, profile?.grade, activeCourse]);
+
+  // 4.5 Sync Class Results (For all users to see 'Último Simulado da Turma')
+  useEffect(() => {
+    const activeEmail = profile?.email || loginData.email;
+    if (!activeEmail) return;
+    
+    setClassResults([]);
+
+    // We use a basic query + local filter to avoid index requirements for now
+    const q = query(
+      collection(db, 'results'),
+      where('course', '==', activeCourse)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const rData = snap.docs
+        .map(d => ({ ...d.data(), id: d.id } as QuizResult))
+        .filter(r => r.room === salaAtual && r.grade === gradeAtual)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      setClassResults(rData.slice(0, 5));
+    }, (error) => {
+      console.error('Error fetching class results:', error);
+    });
+
+    return () => unsub();
+  }, [activeCourse, profile?.email, loginData.email, salaAtual, gradeAtual]);
 
   // 5. Sync All Results (System Dashboard for Monitors - Isolated by room/grade)
   useEffect(() => {
@@ -1314,6 +1345,7 @@ export default function App() {
             {currentView === 'dashboard' && (
               <Dashboard 
                 results={userResults} 
+                classResults={classResults}
                 onStart={(c, t, f) => { setQuizConfig({count:c, topics:t, filter:f}); setCurrentView('quiz'); }} 
                 questions={questions} 
                 profile={profile!} 
@@ -1674,16 +1706,54 @@ function ResumosView({ summaries, activeCourse }: { summaries: SummaryMaterial[]
                 <FileText className="w-7 h-7" />
               </div>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{s.topic}</p>
-              <h3 className="text-xl font-black text-slate-800 leading-tight mb-8 min-h-[3.5rem]">{s.title}</h3>
+              <h3 className="text-xl font-black text-slate-800 leading-tight mb-4">{s.title}</h3>
               
-              <a 
-                href={s.link} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="w-full h-14 bg-slate-900 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-amber-600 transition-all shadow-xl shadow-slate-900/10 active:scale-95"
-              >
-                Acessar PDF <ExternalLink className="w-4 h-4" />
-              </a>
+              <div className="space-y-4">
+                {s.imageUrl && (
+                  <div className="w-full aspect-[4/3] rounded-3xl overflow-hidden border border-slate-100 shadow-inner bg-slate-50">
+                    <img src={s.imageUrl} alt={s.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                )}
+                
+                <div className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                  <p className="text-xs text-slate-600 font-medium leading-relaxed line-clamp-3">
+                    {s.content}
+                  </p>
+                  <button 
+                    onClick={() => {
+                        const win = window.open("", "_blank");
+                        if (win) {
+                            win.document.write(`
+                                <html>
+                                <head>
+                                    <title>${s.title} - Resumo</title>
+                                    <style>
+                                        body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; line-height: 1.6; color: #334155; }
+                                        h1 { font-weight: 900; color: #1e293b; font-size: 2.5rem; margin-bottom: 0.5rem; }
+                                        h2 { font-weight: 700; color: #64748b; font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2rem; }
+                                        img { width: 100%; border-radius: 24px; margin-bottom: 2rem; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+                                        p { white-space: pre-wrap; font-size: 1.1rem; }
+                                        .badge { display: inline-block; padding: 4px 12px; background: #fef3c7; color: #92400e; border-radius: 9999px; font-weight: 800; font-size: 0.75rem; margin-bottom: 1rem; }
+                                    </style>
+                                </head>
+                                <body>
+                                    <div class="badge">${s.topic}</div>
+                                    <h1>${s.title}</h1>
+                                    <h2>Material Complementar</h2>
+                                    ${s.imageUrl ? `<img src="${s.imageUrl}" />` : ''}
+                                    <p>${s.content}</p>
+                                </body>
+                                </html>
+                            `);
+                            win.document.close();
+                        }
+                    }}
+                    className="mt-4 w-full h-12 bg-white text-slate-900 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all shadow-sm active:scale-95"
+                  >
+                    Ler Resumo Completo
+                  </button>
+                </div>
+              </div>
             </motion.div>
           ))}
         </div>
@@ -1697,7 +1767,7 @@ function ResumosView({ summaries, activeCourse }: { summaries: SummaryMaterial[]
   );
 }
 
-function Dashboard({ results, onStart, questions, profile, activeCourse }: { results: QuizResult[], onStart: (count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas') => void, questions: Question[], profile: UserProfile, activeCourse: Course }) {
+function Dashboard({ results, classResults, onStart, questions, profile, activeCourse }: { results: QuizResult[], classResults: QuizResult[], onStart: (count: number, topics: string[], filter: 'Todas' | 'Não Respondidas' | 'Respondidas') => void, questions: Question[], profile: UserProfile, activeCourse: Course }) {
   const [selectedCount, setSelectedCount] = useState(10);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]); // Empty = Todos
   const [filterMode, setFilterMode] = useState<'Todas' | 'Não Respondidas' | 'Respondidas'>('Todas');
@@ -1769,7 +1839,7 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
             <div className="space-y-6">
               <div className="flex items-center justify-between p-5 bg-slate-50 rounded-3xl border border-slate-100">
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Acertos</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Seu Score</p>
                   <p className="text-2xl font-black text-slate-800">{latestResult.score}/{latestResult.total}</p>
                 </div>
                 <div className="relative w-16 h-16 flex items-center justify-center">
@@ -1794,16 +1864,37 @@ function Dashboard({ results, onStart, questions, profile, activeCourse }: { res
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                <Target className="w-3.5 h-3.5" /> Focado em {latestResult.topicsCount} assunto(s)
-              </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center py-10">
-              <BarChart3 className="w-16 h-16 text-slate-100 mb-4" />
-              <p className="text-sm font-bold text-slate-300">Sem histórico ainda.</p>
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-4">
+              <BarChart3 className="w-12 h-12 text-slate-100 mb-4" />
+              <p className="text-xs font-bold text-slate-300">Sem histórico pessoal.</p>
             </div>
           )}
+
+          <div className="mt-6 pt-6 border-t border-slate-100">
+             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
+               <Users className="w-3 h-3" /> Último Simulado da Turma
+             </h4>
+             {classResults.length > 0 ? (
+               <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50">
+                 <div className="flex items-center gap-3">
+                   <div className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center font-bold text-xs uppercase italic">
+                     {classResults[0].userName?.charAt(0) || '?'}
+                   </div>
+                   <div>
+                     <p className="text-xs font-black text-slate-800 leading-tight">{classResults[0].userName || 'Estudante'}</p>
+                     <p className="text-[9px] font-bold text-slate-400 uppercase">Fez {classResults[0].score}/{classResults[0].total}</p>
+                   </div>
+                 </div>
+                 <div className="text-right">
+                   <p className="text-sm font-black text-indigo-600">{((classResults[0].score / classResults[0].total) * 100).toFixed(0)}%</p>
+                 </div>
+               </div>
+             ) : (
+               <p className="text-[10px] font-bold text-slate-300 italic">Ninguém da turma fez simulado hoje.</p>
+             )}
+          </div>
         </Card>
       </div>
 
@@ -2391,7 +2482,10 @@ function MonitorView({
     }
   }, [profile, activeCourse, allUsers.length]);
 
-  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public' | 'resumos'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'cadastrar' | 'users' | 'public'>('stats');
+  const [cadastraType, setCadastraType] = useState<'questoes' | 'videos' | 'resumos'>('questoes');
+  const [topicLock, setTopicLock] = useState(false);
+
   const [adminRoomFilter, setAdminRoomFilter] = useState<string>('Todas');
   const [adminGradeFilter, setAdminGradeFilter] = useState<string>('Todas');
   const [newQ, setNewQ] = useState({ 
@@ -2408,17 +2502,30 @@ function MonitorView({
   const [newSummary, setNewSummary] = useState({
     title: '',
     topic: '',
-    link: ''
+    content: '',
+    imageUrl: ''
   });
 
   const handleSaveSummary = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSummary.title || !newSummary.topic || !newSummary.link) return toast.error('Preencha todos os campos!');
+    if (!newSummary.title || !newSummary.topic || !newSummary.content) return toast.error('Preencha título, assunto e conteúdo!');
     
+    setIsUploading(true);
+    let finalImageUrl = newSummary.imageUrl;
+
     try {
+      if (selectedFile) {
+        finalImageUrl = await convertToBase64(selectedFile);
+        if (finalImageUrl!.length > 800000) {
+           setIsUploading(false);
+           return alert('Imagem muito grande. Tente uma menor.');
+        }
+      }
+
       const id = Math.random().toString(36).substring(2, 11);
       await setDoc(doc(db, 'summaries', id), {
         ...newSummary,
+        imageUrl: finalImageUrl,
         id,
         course: activeCourse,
         room: profile.room,
@@ -2426,10 +2533,41 @@ function MonitorView({
         date: new Date().toISOString()
       });
       toast.success('Resumo cadastrado com sucesso!');
-      setNewSummary({ title: '', topic: '', link: '' });
+      setNewSummary({ title: '', topic: '', content: '', imageUrl: '' });
+      setSelectedFile(null);
     } catch (e) {
       toast.error('Erro ao salvar resumo.');
+    } finally {
+      setIsUploading(false);
     }
+  };
+
+  const convertToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const img = new Image();
+        img.src = reader.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_SIZE = 800;
+          if (width > MAX_SIZE || height > MAX_SIZE) {
+            if (width > height) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+            else { width *= MAX_SIZE / height; height = MAX_SIZE; }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.onerror = reject;
+      };
+      reader.onerror = reject;
+    });
   };
 
   const handleDeleteSummary = async (id: string) => {
@@ -2924,9 +3062,9 @@ function MonitorView({
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
-           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users', 'public', 'resumos'] as const).map(t => (
-             <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-3.5 rounded-xl text-[10px] sm:text-xs font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
-               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : t === 'users' ? 'Usuários' : t === 'public' ? 'Banco Público' : 'Resumos'}
+           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'cadastrar', 'users', 'public'] as const).map(t => (
+             <button key={t} onClick={() => { setActiveTab(t as any); if(t !== 'cadastrar') setTopicLock(false); }} className={`px-4 py-3.5 rounded-xl text-[10px] sm:text-xs font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
+               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'cadastrar' ? 'Cadastrar' : t === 'users' ? 'Usuários' : 'Banco Público'}
              </button>
            ))}
            {!verificarSeEhMonitor(profile, activeCourse) && (
@@ -3459,7 +3597,7 @@ function MonitorView({
           
           {questions.length > 0 ? (
             <div className="space-y-3">
-               {Object.entries(questions.reduce((acc: any, q: any) => {
+               {Object.entries(questions.reduce((acc: any, q: any) => { // TEST 2
                  if (!acc[q.topic]) acc[q.topic] = [];
                  acc[q.topic].push(q);
                  return acc;
@@ -3579,97 +3717,208 @@ function MonitorView({
         </div>
       )}
 
-      {activeTab === 'add' && (
-        <div className="max-w-3xl mx-auto space-y-12 animate-in zoom-in-95 duration-200">
-          <Card className="p-10 md:p-14">
-             <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
-               <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
-             </h3>
-             <form onSubmit={handleSaveQuestion} className="space-y-8">
-               <div className="grid md:grid-cols-2 gap-6">
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
-                   <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Ex: Geometria Analítica" value={newQ.topic} onChange={e => setNewQ({...newQ, topic: e.target.value})} />
-                 </div>
-                 <div className="flex gap-4">
-                    <div className="flex-1 space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Subir Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
-                        <div className="relative">
-                            <input type="file" accept="image/*" id="q-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
-                            <label htmlFor="q-upload" className={`w-full h-14 px-4 rounded-2xl bg-slate-50 border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
-                                <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Clique para selecionar'}</span>
-                                <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
-                            </label>
-                        </div>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Visibilidade</label>
-                        <button 
-                            type="button"
-                            onClick={() => setNewQ({...newQ, isPublic: !newQ.isPublic})}
-                            className={`h-14 px-6 rounded-2xl border transition-all flex items-center gap-2 font-bold text-xs ${newQ.isPublic ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
-                        >
-                            {newQ.isPublic ? <Globe className="w-4 h-4 animate-pulse" /> : <div className="w-4 h-4 rounded-full border-2 border-current"></div>}
-                            {newQ.isPublic ? 'Pública' : 'Privada'}
-                        </button>
-                    </div>
-                 </div>
-               </div>
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL da Imagem (Permanente)</label>
-                 <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Link direto (não user Discord)..." value={newQ.imageUrl} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
-               </div>
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Enunciado Completo</label>
-                 <textarea rows={3} className="w-full p-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 text-sm" placeholder="O que o aluno deve calcular?" value={newQ.text} onChange={e => setNewQ({...newQ, text: e.target.value})} />
-               </div>
-               
-               <div className="space-y-4">
-                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Alternativas</label>
-                 {newQ.options.map((opt, i) => (
-                   <div key={i} className="flex gap-4 items-center group">
-                      <div className={`w-12 h-12 flex-shrink-0 rounded-2xl flex items-center justify-center font-black ${newQ.correctIndex === i ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'}`}>
-                        {String.fromCharCode(65 + i)}
-                      </div>
-                      <input className="flex-1 h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none text-sm font-bold" value={opt} onChange={e => { const o=[...newQ.options]; o[i]=e.target.value; setNewQ({...newQ, options:o}); }} placeholder={`Opção ${String.fromCharCode(65 + i)}`} />
-                      <input type="radio" name="correct" checked={newQ.correctIndex === i} onChange={() => setNewQ({...newQ, correctIndex: i})} className="w-6 h-6 accent-indigo-600" />
+      {activeTab === 'cadastrar' && (
+        <div className="max-w-4xl mx-auto space-y-10 animate-in zoom-in-95 duration-300">
+          <div className="bg-slate-100 p-2 rounded-3xl flex items-center gap-2 w-fit mx-auto">
+            {[
+              { id: 'questoes', label: 'Questões', icon: PlusSquare },
+              { id: 'videos', label: 'Videoaulas', icon: Youtube },
+              { id: 'resumos', label: 'Resumos', icon: FileText }
+            ].map(type => (
+              <button 
+                key={type.id}
+                onClick={() => { setCadastraType(type.id as any); setTopicLock(false); }}
+                className={`px-8 py-3 rounded-2xl flex items-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${cadastraType === type.id ? `bg-white ${theme.classes.text} shadow-xl` : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <type.icon className="w-4 h-4" /> {type.label}
+              </button>
+            ))}
+          </div>
+
+          {cadastraType === 'questoes' && (
+            <Card className="p-10 md:p-14">
+               <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
+                 <PlusSquare className="w-6 h-6 text-indigo-600" /> {editingId ? 'Editar Questão' : 'Cadastrar Questão'}
+               </h3>
+               <form onSubmit={handleSaveQuestion} className="space-y-8">
+                 <div className="grid md:grid-cols-2 gap-6">
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto da Aula</label>
+                     <input 
+                       className={`w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 ${topicLock ? 'opacity-60 cursor-not-allowed bg-slate-100' : ''}`}
+                       placeholder="Ex: Geometria Analítica" 
+                       value={newQ.topic} 
+                       readOnly={topicLock}
+                       onChange={e => !topicLock && setNewQ({...newQ, topic: e.target.value})} 
+                     />
+                     {topicLock && <p className="text-[9px] font-bold text-indigo-500 mt-1 italic leading-none">Assunto travado pelo atalho do banco.</p>}
                    </div>
-                 ))}
-                 <p className="text-[10px] font-bold text-slate-300 italic">Preencha o círculo radioativo na resposta correta</p>
-               </div>
+                   <div className="flex gap-4">
+                      <div className="flex-1 space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-1">Subir Imagem <ShieldCheck className="w-3 h-3 text-emerald-500" /></label>
+                          <div className="relative">
+                              <input type="file" accept="image/*" id="q-upload" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                              <label htmlFor="q-upload" className={`w-full h-14 px-4 rounded-2xl bg-slate-50 border-2 border-dashed flex items-center justify-between cursor-pointer transition-all ${selectedFile ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                  <span className="text-[10px] font-bold text-slate-400 truncate max-w-[120px]">{selectedFile ? selectedFile.name : 'Clique para selecionar'}</span>
+                                  <PlusCircle className={`w-5 h-5 ${selectedFile ? 'text-indigo-600' : 'text-slate-300'}`} />
+                              </label>
+                          </div>
+                      </div>
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Visibilidade</label>
+                          <button 
+                              type="button" 
+                              onClick={() => setNewQ({...newQ, isPublic: !newQ.isPublic})}
+                              className={`h-14 px-6 rounded-2xl border transition-all flex items-center gap-2 font-bold text-xs ${newQ.isPublic ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+                          >
+                              {newQ.isPublic ? <Globe className="w-4 h-4 animate-pulse" /> : <div className="w-4 h-4 rounded-full border-2 border-current"></div>}
+                              {newQ.isPublic ? 'Pública' : 'Privada'}
+                          </button>
+                      </div>
+                   </div>
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">URL da Imagem (Opcional se subir arquivo)</label>
+                   <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300" placeholder="Link direto..." value={newQ.imageUrl} onChange={e => setNewQ({...newQ, imageUrl: e.target.value})} />
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Enunciado Completo</label>
+                   <textarea rows={3} className="w-full p-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 text-sm" placeholder="O que o aluno deve calcular?" value={newQ.text} onChange={e => setNewQ({...newQ, text: e.target.value})} />
+                 </div>
+                 
+                 <div className="space-y-4">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Alternativas</label>
+                   {newQ.options.map((opt, i) => (
+                     <div key={i} className="flex gap-4 items-center group">
+                        <div className={`w-12 h-12 flex-shrink-0 rounded-2xl flex items-center justify-center font-black ${newQ.correctIndex === i ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'}`}>
+                          {String.fromCharCode(65 + i)}
+                        </div>
+                        <input className="flex-1 h-12 px-5 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none text-sm font-bold" value={opt} onChange={e => { const o=[...newQ.options]; o[i]=e.target.value; setNewQ({...newQ, options:o}); }} placeholder={`Opção ${String.fromCharCode(65 + i)}`} />
+                        <input type="radio" name="correct" checked={newQ.correctIndex === i} onChange={() => setNewQ({...newQ, correctIndex: i})} className="w-6 h-6 accent-indigo-600" />
+                     </div>
+                   ))}
+                 </div>
 
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Correção Comentada (Dica do Monitor)</label>
-                 <textarea rows={3} className="w-full p-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 text-sm italic" placeholder="Explique como resolver este problema..." value={newQ.explanation} onChange={e => setNewQ({...newQ, explanation: e.target.value})} />
-               </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Correção Comentada (Dica do Monitor)</label>
+                   <textarea rows={3} className="w-full p-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold placeholder:text-slate-300 text-sm italic" placeholder="Explique como resolver este problema..." value={newQ.explanation} onChange={e => setNewQ({...newQ, explanation: e.target.value})} />
+                 </div>
 
-               <button 
-                 type="submit" 
-                 disabled={isUploading}
-                 className={`w-full h-16 rounded-2xl font-black text-xl shadow-xl transition-all mt-6 flex items-center justify-center gap-3 ${isUploading ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95'}`}
-               >
-                 {isUploading ? (
-                   <> <Loader2 className="w-6 h-6 animate-spin" /> Subindo Imagem...</>
-                 ) : (
-                   editingId ? 'Salvar Alterações' : 'Salvar Questão no Banco'
-                 )}
-               </button>
-             </form>
-          </Card>
+                 <button 
+                   type="submit" 
+                   disabled={isUploading}
+                   className={`w-full h-16 rounded-2xl font-black text-xl shadow-xl transition-all mt-6 flex items-center justify-center gap-3 ${isUploading ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95'}`}
+                 >
+                   {isUploading ? <><Loader2 className="w-6 h-6 animate-spin" /> Salvando...</> : (editingId ? 'Atualizar Questão' : 'Cadastrar Questão')}
+                 </button>
+               </form>
+            </Card>
+          )}
 
-          {/* Bulk Import Tool */}
+          {cadastraType === 'videos' && (
+             <Card className="p-10 md:p-14">
+               <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
+                 <Youtube className="w-6 h-6 text-rose-600" /> Cadastrar Videoaula
+               </h3>
+               <form onSubmit={handleAddVideo} className="space-y-8">
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Título da Vídeoaula</label>
+                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" placeholder="Ex: Introdução a Funções" value={newVideo.title} onChange={e => setNewVideo({...newVideo, title: e.target.value})} />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Link do YouTube</label>
+                    <input className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" placeholder="Cole o link do vídeo aqui..." value={newVideo.youtubeUrl} onChange={e => setNewVideo({...newVideo, youtubeUrl: e.target.value})} />
+                 </div>
+                 <button type="submit" className="w-full h-16 bg-rose-600 text-white rounded-2xl font-black text-xl shadow-xl shadow-rose-600/20 hover:bg-rose-700 active:scale-95 transition-all">Salvar Vídeo</button>
+               </form>
+             </Card>
+          )}
+
+          {cadastraType === 'resumos' && (
+            <Card className="p-10 md:p-14">
+              <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
+                <FileText className="w-6 h-6 text-amber-500" /> {editingId ? 'Editar Resumo' : 'Criar Novo Resumo'}
+              </h3>
+              <form onSubmit={handleSaveSummary} className="space-y-8">
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Título / Conteúdo</label>
+                    <input 
+                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold"
+                      placeholder="Título do Resumo" 
+                      value={newSummary.title} 
+                      onChange={e => setNewSummary({...newSummary, title: e.target.value})} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Assunto / Tópico</label>
+                    <input 
+                      className="w-full h-14 px-6 rounded-2xl bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-bold" 
+                      placeholder="Ex: Revolução Industrial" 
+                      value={newSummary.topic} 
+                      onChange={e => setNewSummary({...newSummary, topic: e.target.value})} 
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Escreva o Resumo por Extenso</label>
+                  <textarea 
+                    rows={10} 
+                    className="w-full p-8 rounded-[2rem] bg-slate-50 border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-medium text-slate-700 leading-relaxed" 
+                    placeholder="Desenvolva o assunto aqui detalhadamente..." 
+                    value={newSummary.content} 
+                    onChange={e => setNewSummary({...newSummary, content: e.target.value})} 
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex items-center gap-2">Ilustração / Foto do Resumo <ImageIcon className="w-3 h-3" /></label>
+                  <div className="relative group">
+                    <input type="file" accept="image/*" id="summary-img" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                    <label 
+                      htmlFor="summary-img" 
+                      className={`w-full h-32 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center transition-all cursor-pointer ${selectedFile ? 'border-amber-500 bg-amber-50/30' : 'border-slate-200 hover:border-slate-300 bg-slate-50'}`}
+                    >
+                      {selectedFile ? (
+                        <>
+                          <CheckCircle2 className="w-8 h-8 text-amber-500 mb-2" />
+                          <p className="text-xs font-black text-amber-600 uppercase">{selectedFile.name}</p>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-8 h-8 text-slate-300 mb-2 group-hover:scale-110 transition-transform" />
+                          <p className="text-xs font-black text-slate-400 uppercase">Anexar imagem ilustrativa</p>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  disabled={isUploading}
+                  className={`w-full h-16 rounded-[1.5rem] font-black text-xl shadow-xl transition-all mt-6 flex items-center justify-center gap-3 ${isUploading ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-amber-500 text-white shadow-amber-500/20 hover:bg-amber-600 active:scale-95'}`}
+                >
+                  {isUploading ? <><Loader2 className="w-6 h-6 animate-spin" /> Salvando...</> : 'Publicar Resumo Premium'}
+                </button>
+              </form>
+            </Card>
+          )}
+
+          {/* Bulk Import Tool (Questões) */}
           <Card className="p-10 bg-slate-50 border-dashed border-2 border-slate-200">
             <div className="flex items-center gap-3 mb-6">
               <ClipboardList className="w-6 h-6 text-indigo-600" />
-              <h3 className="text-xl font-black text-slate-800">Importação em Massa</h3>
+              <h3 className="text-xl font-black text-slate-800">Importação em Massa (JSON)</h3>
             </div>
             <p className="text-sm text-slate-500 mb-6 font-medium">
-              Cole abaixo uma lista de questões em formato JSON para cadastrá-las instantaneamente.
+              Cole abaixo uma lista de questões em formato JSON para importação veloz.
             </p>
             <textarea
               rows={6}
               className="w-full p-6 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 transition-all font-mono text-xs mb-6"
-              placeholder='[ { "pergunta": "Pergunta?", "assunto": "Assunto", "opcoes": ["A", "B", "C", "D"], "correta": 0, "explicacao": "Explicação" }, ... ]'
+              placeholder='[ { "pergunta": "Pergunta?", "assunto": "Assunto", "opcoes": ["A", "B", "C", "D"], "correta": 0 }, ... ]'
               value={bulkJson}
               onChange={(e) => setBulkJson(e.target.value)}
             />
@@ -3679,57 +3928,8 @@ function MonitorView({
               className="h-16 w-full bg-slate-800 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-slate-900 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
             >
               {isImporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlusCircle className="w-5 h-5" />}
-              Importar Lista de Questões
+              Importar Questões
             </button>
-          </Card>
-
-          {/* Cadastrar Videoaula Form */}
-          <Card className="p-10 bg-rose-50/30 border-dashed border-2 border-rose-200">
-             <div className="flex items-center gap-3 mb-6">
-                <Youtube className="w-6 h-6 text-rose-600" />
-                <h3 className="text-xl font-black text-slate-800">Cadastrar Videoaula</h3>
-             </div>
-             
-             <form onSubmit={handleAddVideo} className="grid md:grid-cols-2 gap-4">
-               <div className="space-y-1">
-                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Título da Aula</label>
-                 <input 
-                   className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
-                   value={newVideo.title} onChange={e => setNewVideo({...newVideo, title: e.target.value})} placeholder="Ex: Introdução à Trigonometria" 
-                 />
-               </div>
-               <div className="space-y-1">
-                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Link do YouTube</label>
-                 <div className="flex gap-2">
-                    <input 
-                      className="flex-1 h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all font-medium" 
-                      value={newVideo.youtubeUrl} onChange={e => setNewVideo({...newVideo, youtubeUrl: e.target.value})} placeholder="https://youtube.com/watch?v=..." 
-                    />
-                    <button type="submit" className="px-8 h-12 bg-rose-600 text-white rounded-2xl font-black shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all text-xs uppercase tracking-widest">Salvar Aula</button>
-                 </div>
-               </div>
-             </form>
-
-             {videos.length > 0 && (
-               <div className="mt-8 grid gap-2">
-                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-2">Aulas Atuais</p>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {videos.map((v: any) => (
-                      <div key={v.id} className="p-4 bg-white rounded-2xl border border-slate-100 flex items-center justify-between group">
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600 flex-shrink-0">
-                            <Youtube className="w-4 h-4" />
-                          </div>
-                          <p className="font-bold text-slate-700 text-xs truncate">{v.title}</p>
-                        </div>
-                        <button onClick={() => handleDeleteVideo(v.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-               </div>
-             )}
           </Card>
         </div>
       )}
@@ -3799,81 +3999,6 @@ function MonitorView({
         </div>
       )}
 
-      {activeTab === 'resumos' && (
-        <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
-           <div className="flex items-center justify-between">
-              <div>
-                 <h3 className="text-2xl font-black text-slate-800 tracking-tight">Banco de Resumos</h3>
-                 <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Apostilas e Materiais Complementares</p>
-              </div>
-              <Badge color="amber">Total: {summaries.length}</Badge>
-           </div>
-
-           <Card className="p-10 bg-amber-50/30 border-dashed border-2 border-amber-200">
-              <div className="flex items-center gap-3 mb-6">
-                 <FileText className="w-6 h-6 text-amber-600" />
-                 <h3 className="text-xl font-black text-slate-800">Cadastrar Novo Resumo</h3>
-              </div>
-              
-              <form onSubmit={handleSaveSummary} className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Título do Material</label>
-                  <input 
-                    className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
-                    value={newSummary.title} onChange={e => setNewSummary({...newSummary, title: e.target.value})} placeholder="Ex: Apostila de Revisão" 
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assunto/Conteúdo</label>
-                  <input 
-                    className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
-                    value={newSummary.topic} onChange={e => setNewSummary({...newSummary, topic: e.target.value})} placeholder="Ex: Botânica" 
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Link do Material</label>
-                  <div className="flex gap-2">
-                     <input 
-                       className="flex-1 h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
-                       value={newSummary.link} onChange={e => setNewSummary({...newSummary, link: e.target.value})} placeholder="https://..." 
-                     />
-                     <button type="submit" className="px-6 h-12 bg-amber-600 text-white rounded-2xl font-black shadow-lg shadow-amber-600/20 hover:bg-amber-700 transition-all text-[10px] uppercase tracking-widest">Salvar</button>
-                  </div>
-                </div>
-              </form>
-
-              {summaries.length > 0 && (
-                <div className="mt-10">
-                   <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-4 ml-1">Materiais Cadastrados</p>
-                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                     {summaries.map((s: any) => (
-                       <div key={s.id} className="group bg-white rounded-3xl border border-slate-100 p-5 hover:shadow-xl hover:shadow-slate-200/50 transition-all border-b-4 border-b-amber-100">
-                         <div className="flex items-start justify-between mb-3">
-                           <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
-                             <FileText className="w-5 h-5" />
-                           </div>
-                           <button onClick={() => handleDeleteSummary(s.id)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors">
-                             <Trash2 className="w-4 h-4" />
-                           </button>
-                         </div>
-                         <h4 className="font-black text-slate-800 leading-tight mb-1">{s.title}</h4>
-                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{s.topic}</p>
-                         <a 
-                           href={s.link} 
-                           target="_blank" 
-                           rel="noopener noreferrer"
-                           className="flex items-center justify-center w-full py-3 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all shadow-sm"
-                         >
-                           Acessar Material <ExternalLink className="w-3 h-3 ml-2" />
-                         </a>
-                       </div>
-                     ))}
-                   </div>
-                </div>
-              )}
-           </Card>
-         </div>
-       )}
 
       <AnimatePresence>
         {showBulkDeleteModal && (
