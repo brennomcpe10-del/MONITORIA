@@ -40,7 +40,8 @@ import {
   ShieldCheck,
   ChevronDown,
   Zap,
-  Globe
+  Globe,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -217,6 +218,17 @@ interface UserSummary {
   totalQuestions?: number;
 }
 
+interface SummaryMaterial {
+  id: string;
+  title: string;
+  course: string;
+  topic: string;
+  link: string;
+  room?: string;
+  grade?: string;
+  date: string;
+}
+
 interface Question {
   id: string;
   text: string;
@@ -346,9 +358,10 @@ export default function App() {
   // --- App State ---
   const [allUsers, setAllUsers] = useState<UserSummary[]>([]);
   const [activeCourse, setActiveCourse] = useState<Course>('Matemática');
-  const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor' | 'videos'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'quiz' | 'monitor' | 'videos' | 'resumos'>('dashboard');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showMobileCourses, setShowMobileCourses] = useState(false);
+  const [summaries, setSummaries] = useState<SummaryMaterial[]>([]);
 
   const [hasSelectedInitialCourse, setHasSelectedInitialCourse] = useState(false);
 
@@ -415,20 +428,20 @@ export default function App() {
 
   // 0. Cache Cleanup and State Reset on Context Change
   const resetData = useCallback(() => {
-    setUserResults([]);
-    setSystemResults([]);
-    setAllUsers([]);
-    setQuestions([]);
-    setVideos([]);
+    // Note: We are no longer clearing results/questions/videos here to avoid "sumir dados" (data vanishing) 
+    // while loading the new room. Firebase onSnapshot will replace the data naturally.
     setSelectedStudent(null);
     setStudentDetailedProfile(null);
   }, []);
 
+  const salaAtual = profile?.room || loginData.room || 'C';
+  const gradeAtual = profile?.grade || loginData.grade || '3º Ano';
+
   useEffect(() => {
-    if (profile?.room || profile?.grade || activeCourse) {
+    if (salaAtual || gradeAtual || activeCourse) {
       resetData();
     }
-  }, [profile?.room, profile?.grade, activeCourse, resetData]);
+  }, [salaAtual, gradeAtual, activeCourse, resetData]);
 
   // 1. Sync Profile in real-time
   useEffect(() => {
@@ -489,14 +502,14 @@ export default function App() {
         .map(d => {
           const data = d.data();
           // Auto-migração se o usuário for monitor/admin na 3C
-          if (!data.room && userRoom === 'C' && userGrade === '3º Ano') {
+          if (!data.room && salaAtual === 'C' && gradeAtual === '3º Ano') {
             migrarDocumentoLegado('questions', d.id, data);
           }
           return { ...data, id: d.id } as Question;
         })
         .filter(q => {
-          const isSameRoom = q.room === userRoom && q.grade === userGrade;
-          const isLegacyFor3C = !q.room && userRoom === 'C' && userGrade === '3º Ano';
+          const isSameRoom = q.room === salaAtual && q.grade === gradeAtual;
+          const isLegacyFor3C = !q.room && salaAtual === 'C' && gradeAtual === '3º Ano';
           return isSameRoom || isLegacyFor3C;
         });
 
@@ -506,16 +519,13 @@ export default function App() {
     });
 
     return () => unsub();
-  }, [activeCourse, profile?.room, profile?.grade, loginData.room, loginData.grade, loginData.email]);
+  }, [activeCourse, salaAtual, gradeAtual, loginData.email]);
 
   // 2.5 Sync Videos (Strict Isolation + Legacy Support)
   useEffect(() => {
     const activeEmail = profile?.email || loginData.email;
     if (!activeEmail) return;
 
-    const userRoom = profile?.room || loginData.room;
-    const userGrade = profile?.grade || loginData.grade;
-    
     setVideos([]); 
 
     const q = query(
@@ -527,14 +537,14 @@ export default function App() {
       const vData = snap.docs
         .map(d => {
           const data = d.data();
-          if (!data.room && userRoom === 'C' && userGrade === '3º Ano') {
+          if (!data.room && salaAtual === 'C' && gradeAtual === '3º Ano') {
             migrarDocumentoLegado('videos', d.id, data);
           }
           return { ...data, id: d.id } as VideoClass;
         })
         .filter(v => {
-          const isSameRoom = v.room === userRoom && v.grade === userGrade;
-          const isLegacyFor3C = !v.room && userRoom === 'C' && userGrade === '3º Ano';
+          const isSameRoom = v.room === salaAtual && v.grade === gradeAtual;
+          const isLegacyFor3C = !v.room && salaAtual === 'C' && gradeAtual === '3º Ano';
           return isSameRoom || isLegacyFor3C;
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -545,7 +555,38 @@ export default function App() {
     });
     
     return () => unsubVideos();
-  }, [activeCourse, profile?.room, profile?.grade, loginData.room, loginData.grade, loginData.email]);
+  }, [activeCourse, salaAtual, gradeAtual, loginData.email]);
+
+  // 2.7 Sync Summaries (Resumos)
+  useEffect(() => {
+    const activeEmail = profile?.email || loginData.email;
+    if (!activeEmail) return;
+
+    setSummaries([]);
+
+    const q = query(
+      collection(db, 'summaries'),
+      where('course', '==', activeCourse)
+    );
+
+    const unsubSummaries = onSnapshot(q, (snap) => {
+      const sData = snap.docs
+        .map(d => ({ ...d.data(), id: d.id } as SummaryMaterial))
+        .filter(s => {
+          const isSameRoom = s.room === salaAtual && s.grade === gradeAtual;
+          // Suporte a resumos sem sala (legado/global se houver)
+          const isLegacyFor3C = !s.room && salaAtual === 'C' && gradeAtual === '3º Ano';
+          return isSameRoom || isLegacyFor3C;
+        })
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      setSummaries(sData);
+    }, (error) => {
+      console.error('Error fetching summaries:', error);
+    });
+
+    return () => unsubSummaries();
+  }, [activeCourse, salaAtual, gradeAtual, loginData.email]);
 
   // 3. Sync All Users (Strict Isolation + Legacy Support)
   useEffect(() => {
@@ -1004,6 +1045,13 @@ export default function App() {
               <LayoutDashboard className="w-4 h-4" /> Início
             </button>
 
+            <button 
+              onClick={() => { setCurrentView('resumos'); setShowMenu(false); }}
+              className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'resumos' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <FileText className="w-4 h-4" /> Resumos
+            </button>
+
             <div className="relative">
               <button 
                 onClick={() => setShowMenu(!showMenu)}
@@ -1155,6 +1203,20 @@ export default function App() {
                   className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'dashboard' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
                 >
                   <LayoutDashboard className="w-6 h-6" /> Início
+                </button>
+
+                <button 
+                  onClick={() => { setCurrentView('resumos'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                  className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'resumos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <FileText className="w-6 h-6" /> Resumos
+                </button>
+
+                <button 
+                  onClick={() => { setCurrentView('videos'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
+                  className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <Youtube className="w-6 h-6" /> Videoaulas
                 </button>
                 
                 <button 
@@ -1332,10 +1394,16 @@ export default function App() {
                 studentDetailedProfile={studentDetailedProfile}
                 setStudentDetailedProfile={setStudentDetailedProfile}
                 loginData={loginData}
+                summaries={summaries}
+                salaAtual={salaAtual}
+                gradeAtual={gradeAtual}
               />
             )}
             {currentView === 'videos' && (
               <VideosView videos={videos} activeCourse={activeCourse} profile={profile} />
+            )}
+            {currentView === 'resumos' && (
+              <ResumosView summaries={summaries} activeCourse={activeCourse} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -1556,6 +1624,73 @@ function VideosView({ videos, activeCourse, profile }: { videos: VideoClass[], a
         <div className="py-20 text-center space-y-4">
           <Youtube className="w-20 h-20 text-slate-100 mx-auto" />
           <p className="text-slate-300 font-bold italic text-lg">Nenhuma videoaula disponível no momento.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResumosView({ summaries, activeCourse }: { summaries: SummaryMaterial[], activeCourse: Course }) {
+  const theme = COURSE_THEMES[activeCourse];
+  const [filterTopic, setFilterTopic] = useState<string>('Todos');
+
+  const topics = Array.from(new Set(summaries.map(s => s.topic)));
+  const filteredSummaries = filterTopic === 'Todos' ? summaries : summaries.filter(s => s.topic === filterTopic);
+
+  return (
+    <div className="space-y-10 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none italic uppercase">Banco de Resumos</h2>
+          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">{activeCourse} • Sua biblioteca de estudos</p>
+        </div>
+        
+        <div className="flex flex-col gap-2 min-w-[240px]">
+          <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Filtrar por Assunto</label>
+          <div className="relative">
+            <select 
+              value={filterTopic} 
+              onChange={e => setFilterTopic(e.target.value)}
+              className="w-full h-12 pl-6 pr-10 rounded-2xl bg-white border border-slate-200 focus:outline-none focus:ring-4 focus:ring-indigo-600/10 font-bold text-sm appearance-none cursor-pointer"
+            >
+              <option value="Todos">Todos os Assuntos</option>
+              {topics.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          </div>
+        </div>
+      </div>
+
+      {filteredSummaries.length > 0 ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredSummaries.map(s => (
+            <motion.div 
+              key={s.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="group bg-white rounded-[2.5rem] border border-slate-100 p-8 hover:shadow-2xl hover:shadow-slate-200/50 transition-all border-b-[6px] border-b-amber-500/20 hover:border-b-amber-500/40"
+            >
+              <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mb-6 group-hover:scale-110 transition-transform">
+                <FileText className="w-7 h-7" />
+              </div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{s.topic}</p>
+              <h3 className="text-xl font-black text-slate-800 leading-tight mb-8 min-h-[3.5rem]">{s.title}</h3>
+              
+              <a 
+                href={s.link} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="w-full h-14 bg-slate-900 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-amber-600 transition-all shadow-xl shadow-slate-900/10 active:scale-95"
+              >
+                Acessar PDF <ExternalLink className="w-4 h-4" />
+              </a>
+            </motion.div>
+          ))}
+        </div>
+      ) : (
+        <div className="py-20 text-center space-y-4">
+          <FileText className="w-20 h-20 text-slate-100 mx-auto" />
+          <p className="text-slate-300 font-bold italic text-lg">Nenhum resumo encontrado para este filtro.</p>
         </div>
       )}
     </div>
@@ -2222,7 +2357,10 @@ function MonitorView({
   setSelectedStudent,
   studentDetailedProfile,
   setStudentDetailedProfile,
-  loginData
+  loginData,
+  summaries,
+  salaAtual,
+  gradeAtual
 }: { 
   results: QuizResult[], 
   questions: Question[], 
@@ -2235,7 +2373,10 @@ function MonitorView({
   setSelectedStudent: (val: string | null) => void,
   studentDetailedProfile: any,
   setStudentDetailedProfile: (val: any) => void,
-  loginData: any
+  loginData: any,
+  summaries: SummaryMaterial[],
+  salaAtual: string,
+  gradeAtual: string
 }) {
   const theme = COURSE_THEMES[activeCourse];
   
@@ -2250,7 +2391,7 @@ function MonitorView({
     }
   }, [profile, activeCourse, allUsers.length]);
 
-  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'add' | 'users' | 'public' | 'resumos'>('stats');
   const [adminRoomFilter, setAdminRoomFilter] = useState<string>('Todas');
   const [adminGradeFilter, setAdminGradeFilter] = useState<string>('Todas');
   const [newQ, setNewQ] = useState({ 
@@ -2263,6 +2404,44 @@ function MonitorView({
     course: activeCourse as Course,
     isPublic: false 
   });
+
+  const [newSummary, setNewSummary] = useState({
+    title: '',
+    topic: '',
+    link: ''
+  });
+
+  const handleSaveSummary = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSummary.title || !newSummary.topic || !newSummary.link) return toast.error('Preencha todos os campos!');
+    
+    try {
+      const id = Math.random().toString(36).substring(2, 11);
+      await setDoc(doc(db, 'summaries', id), {
+        ...newSummary,
+        id,
+        course: activeCourse,
+        room: profile.room,
+        grade: profile.grade,
+        date: new Date().toISOString()
+      });
+      toast.success('Resumo cadastrado com sucesso!');
+      setNewSummary({ title: '', topic: '', link: '' });
+    } catch (e) {
+      toast.error('Erro ao salvar resumo.');
+    }
+  };
+
+  const handleDeleteSummary = async (id: string) => {
+    if (confirm('Deseja realmente excluir este resumo?')) {
+      try {
+        await deleteDoc(doc(db, 'summaries', id));
+        toast.success('Resumo excluído!');
+      } catch (e) {
+        toast.error('Erro ao excluir resumo.');
+      }
+    }
+  };
   const [publicQuestions, setPublicQuestions] = useState<Question[]>([]);
   const [newVideo, setNewVideo] = useState({ title: '', youtubeUrl: '' });
 
@@ -2529,7 +2708,7 @@ function MonitorView({
 
   const handleSaveQuestion = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newQ.text || !newQ.topic || newQ.options.some(o => !o) || !newQ.explanation) return toast.error('Complete todos os campos!');
+    if (!newQ.text || !newQ.topic || newQ.options.some(o => !o)) return toast.error('Complete os campos obrigatórios!');
     
     setIsUploading(true);
     let finalImageUrl = newQ.imageUrl;
@@ -2588,9 +2767,9 @@ function MonitorView({
 
       const id = editingId || Math.random().toString(36).substring(2, 11);
       
-      // Captura dinâmica da sala do monitor
-      const questionRoom = profile?.room || loginData.room;
-      const questionGrade = profile?.grade || loginData.grade;
+      // Captura dinâmica da sala selecionada (Contexto)
+      const questionRoom = salaAtual;
+      const questionGrade = gradeAtual;
       
       if (!questionRoom || !questionGrade) {
         console.error('[ERRO CRÍTICO] Monitor sem sala/série definida ao tentar salvar questão.');
@@ -2648,9 +2827,10 @@ function MonitorView({
       setIsImporting(true);
       let count = 0;
       
-      const qRoom = profile?.room || loginData.room;
-      const qGrade = profile?.grade || loginData.grade;
-
+      // Contexto dinâmico de importação
+      const qRoom = salaAtual;
+      const qGrade = gradeAtual;
+      
       if (!qRoom || !qGrade) {
         console.error('[ERRO CRÍTICO] Monitor sem sala/série definida ao tentar importar em massa.');
         return toast.error('Turma não identificada para importação.');
@@ -2703,8 +2883,8 @@ function MonitorView({
 
     try {
       const id = Math.random().toString(36).substring(2, 11);
-      const vRoom = profile?.room || 'C';
-      const vGrade = profile?.grade || '3º Ano';
+      const vRoom = salaAtual;
+      const vGrade = gradeAtual;
 
       console.log('Salvando vídeo para a sala:', vRoom);
 
@@ -2744,9 +2924,9 @@ function MonitorView({
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Análise de Performance • {activeCourse}</p>
         </div>
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex flex-wrap gap-1 w-fit">
-           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users', 'public'] as const).map(t => (
+           {verificarSeEhMonitor(profile, activeCourse) && (['stats', 'list', 'add', 'users', 'public', 'resumos'] as const).map(t => (
              <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-3.5 rounded-xl text-[10px] sm:text-xs font-black transition-all uppercase tracking-widest ${activeTab === t ? `bg-white ${theme.classes.text} shadow-sm` : 'text-slate-500 hover:text-slate-900'}`}>
-               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : t === 'users' ? 'Usuários' : 'Banco Público'}
+               {t === 'stats' ? 'Dashboard' : t === 'list' ? 'Banco Dados' : t === 'add' ? 'Cadastrar' : t === 'users' ? 'Usuários' : t === 'public' ? 'Banco Público' : 'Resumos'}
              </button>
            ))}
            {!verificarSeEhMonitor(profile, activeCourse) && (
@@ -2816,7 +2996,9 @@ function MonitorView({
                             </div>
                           </div>
                         </td>
-                        <td className="px-8 py-6 text-sm text-slate-400 font-medium">{u.email}</td>
+                        <td className="px-8 py-6 text-sm text-slate-400 font-medium">
+                          {isAdmin ? u.email : u.email.replace(/(.{2})(.*)(@.*)/, "$1***$3")}
+                        </td>
                         <td className="px-8 py-6">
                           {u.approved ? (
                             <div className="flex flex-col gap-1">
@@ -3121,7 +3303,7 @@ function MonitorView({
                              <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center font-bold text-xs">{s.name ? s.name.charAt(0) : '?'}</div>
                              <div>
                                <p className="text-sm font-bold text-slate-700">{s.name}</p>
-                               <p className="text-[10px] text-slate-400 font-medium">{s.email}</p>
+                               <p className="text-[10px] text-slate-400 font-medium">{isAdmin ? s.email : s.email.replace(/(.{2})(.*)(@.*)/, "$1***$3")}</p>
                              </div>
                           </div>
                         ));
@@ -3616,6 +3798,82 @@ function MonitorView({
            )}
         </div>
       )}
+
+      {activeTab === 'resumos' && (
+        <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+           <div className="flex items-center justify-between">
+              <div>
+                 <h3 className="text-2xl font-black text-slate-800 tracking-tight">Banco de Resumos</h3>
+                 <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Apostilas e Materiais Complementares</p>
+              </div>
+              <Badge color="amber">Total: {summaries.length}</Badge>
+           </div>
+
+           <Card className="p-10 bg-amber-50/30 border-dashed border-2 border-amber-200">
+              <div className="flex items-center gap-3 mb-6">
+                 <FileText className="w-6 h-6 text-amber-600" />
+                 <h3 className="text-xl font-black text-slate-800">Cadastrar Novo Resumo</h3>
+              </div>
+              
+              <form onSubmit={handleSaveSummary} className="grid md:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Título do Material</label>
+                  <input 
+                    className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
+                    value={newSummary.title} onChange={e => setNewSummary({...newSummary, title: e.target.value})} placeholder="Ex: Apostila de Revisão" 
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Assunto/Conteúdo</label>
+                  <input 
+                    className="w-full h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
+                    value={newSummary.topic} onChange={e => setNewSummary({...newSummary, topic: e.target.value})} placeholder="Ex: Botânica" 
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Link do Material</label>
+                  <div className="flex gap-2">
+                     <input 
+                       className="flex-1 h-12 px-5 rounded-2xl bg-white border border-slate-100 focus:outline-none focus:ring-4 focus:ring-amber-600/10 focus:border-amber-600 transition-all font-medium" 
+                       value={newSummary.link} onChange={e => setNewSummary({...newSummary, link: e.target.value})} placeholder="https://..." 
+                     />
+                     <button type="submit" className="px-6 h-12 bg-amber-600 text-white rounded-2xl font-black shadow-lg shadow-amber-600/20 hover:bg-amber-700 transition-all text-[10px] uppercase tracking-widest">Salvar</button>
+                  </div>
+                </div>
+              </form>
+
+              {summaries.length > 0 && (
+                <div className="mt-10">
+                   <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-4 ml-1">Materiais Cadastrados</p>
+                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                     {summaries.map((s: any) => (
+                       <div key={s.id} className="group bg-white rounded-3xl border border-slate-100 p-5 hover:shadow-xl hover:shadow-slate-200/50 transition-all border-b-4 border-b-amber-100">
+                         <div className="flex items-start justify-between mb-3">
+                           <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+                             <FileText className="w-5 h-5" />
+                           </div>
+                           <button onClick={() => handleDeleteSummary(s.id)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors">
+                             <Trash2 className="w-4 h-4" />
+                           </button>
+                         </div>
+                         <h4 className="font-black text-slate-800 leading-tight mb-1">{s.title}</h4>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{s.topic}</p>
+                         <a 
+                           href={s.link} 
+                           target="_blank" 
+                           rel="noopener noreferrer"
+                           className="flex items-center justify-center w-full py-3 bg-slate-50 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all shadow-sm"
+                         >
+                           Acessar Material <ExternalLink className="w-3 h-3 ml-2" />
+                         </a>
+                       </div>
+                     ))}
+                   </div>
+                </div>
+              )}
+           </Card>
+         </div>
+       )}
 
       <AnimatePresence>
         {showBulkDeleteModal && (
