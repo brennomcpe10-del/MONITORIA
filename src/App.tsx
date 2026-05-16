@@ -513,8 +513,8 @@ export default function App() {
         })
         .filter(q => {
           const isSameRoom = q.room === salaAtual && q.grade === gradeAtual;
-          const isLegacyFor3C = !q.room && salaAtual === 'C' && gradeAtual === '3º Ano';
-          return isSameRoom || isLegacyFor3C;
+          // Mostramos questões da sala atual do usuário logado
+          return isSameRoom;
         });
 
       setQuestions(qData);
@@ -1076,13 +1076,6 @@ export default function App() {
               <LayoutDashboard className="w-4 h-4" /> Início
             </button>
 
-            <button 
-              onClick={() => { setCurrentView('resumos'); setShowMenu(false); }}
-              className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all ${currentView === 'resumos' ? `${theme.classes.bg} text-white shadow-lg ${theme.classes.shadow} px-6` : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              <FileText className="w-4 h-4" /> Resumos
-            </button>
-
             <div className="relative">
               <button 
                 onClick={() => setShowMenu(!showMenu)}
@@ -1112,6 +1105,18 @@ export default function App() {
                            <div>
                              <p className="font-black text-sm">Videoaulas</p>
                              <p className="text-[10px] font-medium text-slate-400 leading-none">Aulas gravadas</p>
+                           </div>
+                         </button>
+                         <button 
+                           onClick={() => { setCurrentView('resumos'); setShowMenu(false); }}
+                           className={`flex items-center gap-3 w-full p-4 rounded-2xl ${theme.classes.hoverBg} text-slate-600 hover:${theme.classes.text} transition-all text-left`}
+                         >
+                           <div className={`w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600`}>
+                             <FileText className="w-5 h-5" />
+                           </div>
+                           <div>
+                             <p className="font-black text-sm">Resumos</p>
+                             <p className="text-[10px] font-medium text-slate-400 leading-none text-amber-500">Apoio ao estudo</p>
                            </div>
                          </button>
                          <div className="mx-4 my-2 h-px bg-slate-50"></div>
@@ -1249,7 +1254,7 @@ export default function App() {
                 >
                   <Youtube className="w-6 h-6" /> Videoaulas
                 </button>
-                
+
                 <button 
                   onClick={() => setShowMobileCourses(!showMobileCourses)}
                   className={`w-full p-5 rounded-[1.5rem] flex items-center justify-between font-black transition-all ${showMobileCourses ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
@@ -1285,13 +1290,6 @@ export default function App() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                <button 
-                  onClick={() => { setCurrentView('videos'); setShowMobileSidebar(false); setShowMobileCourses(false); }}
-                  className={`w-full p-5 rounded-[1.5rem] flex items-center gap-4 font-black transition-all ${currentView === 'videos' ? `${theme.classes.bg} text-white shadow-lg` : 'text-slate-500 hover:bg-slate-50'}`}
-                >
-                  <Youtube className="w-6 h-6" /> Videoaulas
-                </button>
                 {profile.email === 'brennomcpe10@gmail.com' && (
                   <button 
                     onClick={() => { setShowRoomSwitcher(true); setShowMobileSidebar(false); }}
@@ -1871,30 +1869,6 @@ function Dashboard({ results, classResults, onStart, questions, profile, activeC
               <p className="text-xs font-bold text-slate-300">Sem histórico pessoal.</p>
             </div>
           )}
-
-          <div className="mt-6 pt-6 border-t border-slate-100">
-             <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-               <Users className="w-3 h-3" /> Último Simulado da Turma
-             </h4>
-             {classResults.length > 0 ? (
-               <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50">
-                 <div className="flex items-center gap-3">
-                   <div className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center font-bold text-xs uppercase italic">
-                     {classResults[0].userName?.charAt(0) || '?'}
-                   </div>
-                   <div>
-                     <p className="text-xs font-black text-slate-800 leading-tight">{classResults[0].userName || 'Estudante'}</p>
-                     <p className="text-[9px] font-bold text-slate-400 uppercase">Fez {classResults[0].score}/{classResults[0].total}</p>
-                   </div>
-                 </div>
-                 <div className="text-right">
-                   <p className="text-sm font-black text-indigo-600">{((classResults[0].score / classResults[0].total) * 100).toFixed(0)}%</p>
-                 </div>
-               </div>
-             ) : (
-               <p className="text-[10px] font-bold text-slate-300 italic">Ninguém da turma fez simulado hoje.</p>
-             )}
-          </div>
         </Card>
       </div>
 
@@ -2483,7 +2457,7 @@ function MonitorView({
   }, [profile, activeCourse, allUsers.length]);
 
   const [activeTab, setActiveTab] = useState<'stats' | 'list' | 'cadastrar' | 'users' | 'public'>('stats');
-  const [cadastraType, setCadastraType] = useState<'questoes' | 'videos' | 'resumos'>('questoes');
+  const [cadastraType, setCadastraType] = useState<'questoes' | 'videos' | 'resumos' | null>(null);
   const [topicLock, setTopicLock] = useState(false);
 
   const [adminRoomFilter, setAdminRoomFilter] = useState<string>('Todas');
@@ -3621,10 +3595,24 @@ function MonitorView({
                          <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
                            <Target className="w-5 h-5" />
                          </div>
-                         <div>
-                           <h4 className="font-black text-slate-800 tracking-tight">{topic}</h4>
-                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qs.length} questões cadastradas</p>
-                         </div>
+                         <div className="flex-1 flex items-center justify-between">
+                            <div>
+                              <h4 className="font-black text-slate-800 tracking-tight">{topic}</h4>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{qs.length} questões cadastradas</p>
+                            </div>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNewQ({ ...newQ, topic: topic });
+                                setTopicLock(true);
+                                setActiveTab('cadastrar');
+                                setCadastraType('questoes');
+                              }}
+                              className="h-9 px-4 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-2 mr-4"
+                            >
+                              <PlusCircle className="w-3.5 h-3.5" /> Adicionar Questão
+                            </button>
+                          </div>
                        </div>
                        <div className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
                          <ArrowRight className="w-5 h-5 text-slate-300 rotate-90" />
@@ -3718,22 +3706,62 @@ function MonitorView({
       )}
 
       {activeTab === 'cadastrar' && (
-        <div className="max-w-4xl mx-auto space-y-10 animate-in zoom-in-95 duration-300">
-          <div className="bg-slate-100 p-2 rounded-3xl flex items-center gap-2 w-fit mx-auto">
-            {[
-              { id: 'questoes', label: 'Questões', icon: PlusSquare },
-              { id: 'videos', label: 'Videoaulas', icon: Youtube },
-              { id: 'resumos', label: 'Resumos', icon: FileText }
-            ].map(type => (
-              <button 
-                key={type.id}
-                onClick={() => { setCadastraType(type.id as any); setTopicLock(false); }}
-                className={`px-8 py-3 rounded-2xl flex items-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${cadastraType === type.id ? `bg-white ${theme.classes.text} shadow-xl` : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <type.icon className="w-4 h-4" /> {type.label}
-              </button>
-            ))}
-          </div>
+        <div className="max-w-5xl mx-auto space-y-10 animate-in zoom-in-95 duration-300">
+          {!cadastraType ? (
+            <div className="space-y-10 py-10">
+              <div className="text-center space-y-4">
+                <div className={`w-20 h-20 bg-slate-100 rounded-[2rem] flex items-center justify-center mx-auto text-slate-300 mb-6`}>
+                  <PlusCircle className="w-10 h-10" />
+                </div>
+                <h2 className="text-4xl font-black text-slate-900 tracking-tight">O que deseja cadastrar?</h2>
+                <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest leading-none">Selecione uma categoria para adicionar novo conteúdo ao curso</p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-8">
+                {[
+                  { id: 'questoes', label: 'Questões', desc: 'Perguntas dinâmicas para o simulado.', icon: Target, color: 'bg-indigo-600' },
+                  { id: 'videos', label: 'Videoaulas', desc: 'Aulas teóricas do YouTube.', icon: Youtube, color: 'bg-rose-600' },
+                  { id: 'resumos', label: 'Resumos', desc: 'Textos de apoio com imagens.', icon: FileText, color: 'bg-amber-500' }
+                ].map(op => (
+                  <button 
+                    key={op.id}
+                    onClick={() => { setCadastraType(op.id as any); setTopicLock(false); }}
+                    className="group bg-white p-8 rounded-[3rem] border border-slate-100 hover:shadow-2xl hover:shadow-slate-200/50 transition-all text-left flex flex-col items-start gap-6 border-b-[8px] border-b-slate-100 hover:border-b-indigo-100"
+                  >
+                    <div className={`w-16 h-16 ${op.color} text-white rounded-3xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform`}>
+                      <op.icon className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 leading-tight mb-2 tracking-tight">{op.label}</h3>
+                      <p className="text-xs text-slate-400 font-bold leading-relaxed">{op.desc}</p>
+                    </div>
+                    <div className="mt-auto pt-4 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-300 group-hover:text-indigo-600 transition-colors">
+                      Começar Agora <ArrowRight className="w-4 h-4 translate-x-0 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-10">
+              <div className="flex items-center justify-between bg-white/80 backdrop-blur-md p-5 rounded-[2.5rem] border border-white shadow-xl shadow-slate-200/30 sticky top-4 z-40">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 ${cadastraType === 'questoes' ? 'bg-indigo-600' : cadastraType === 'videos' ? 'bg-rose-600' : 'bg-amber-500'} text-white rounded-2xl flex items-center justify-center shadow-lg`}>
+                    {cadastraType === 'questoes' ? <Target className="w-6 h-6" /> : cadastraType === 'videos' ? <Youtube className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-800 text-lg leading-tight">Cadastrar {cadastraType === 'questoes' ? 'Questão' : cadastraType === 'videos' ? 'Videoaula' : 'Resumo'}</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{activeCourse}</p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => { setCadastraType(null); setTopicLock(false); }}
+                  className="flex items-center gap-2 px-6 h-12 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-900/20"
+                >
+                  <ArrowRight className="w-4 h-4 rotate-180" /> Voltar
+                </button>
+              </div>
 
           {cadastraType === 'questoes' && (
             <Card className="p-10 md:p-14">
@@ -3931,6 +3959,8 @@ function MonitorView({
               Importar Questões
             </button>
           </Card>
+            </div>
+          )}
         </div>
       )}
 
